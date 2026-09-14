@@ -1,0 +1,473 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@400;700&display=swap');
+
+/* =========================
+   Variables globales
+   ========================= */
+:root {
+  --bg: #000000;
+  --accent-blue: #1E90FF;
+  --accent-green: #39FF14;
+  --text: #FFFFFF;
+  --text-2: #D3D3D3;
+}
+
+/* =========================
+   Reset y fuente global
+   ========================= */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Roboto', system-ui, -apple-system, Segoe UI, sans-serif !important;
+}
+
+body, html, #root, .card, .btn, .dropdown-item, h1, h2, h3, h4, h5, h6, p, span, a {
+  font-family: 'Roboto', system-ui, -apple-system, Segoe UI, sans-serif !important;
+}
+
+/* =========================
+   SweetAlert2 custom
+   ========================= */
+.swal2-popup {
+  background-color: #2c2c2c !important; /* gris oscuro similar a tus cards */
+  color: #fff !important;               /* texto blanco */
+  border-radius: 16px !important;
+  font-family: 'Roboto', sans-serif !important;
+}
+
+.swal2-title {
+  color: var(--accent-blue) !important; /* título en azul neon */
+  font-weight: 700 !important;
+}
+
+.swal2-content {
+  color: #d3d3d3 !important;            /* texto gris claro */
+}
+
+.swal2-confirm {
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-green)) !important;
+  color: #000 !important;
+  font-weight: 700;
+  border: none !important;
+  border-radius: 8px !important;
+  padding: 0.5rem 1rem !important;
+}
+
+.swal2-confirm:hover {
+  filter: brightness(1.1) !important;
+}
+
+/* =========================
+   Fuentes especiales
+   ========================= */
+.brand, .section-title {
+  font-family: 'Orbitron', 'Roboto', sans-serif;
+  letter-spacing: 0.5px;
+}
+
+.form-hint {
+  color: var(--accent-blue);
+  font-size: 0.85rem; 
+  margin-top: 0.25rem;
+  display: block;
+}
+
+/* =========================
+   Banner Auth
+   ========================= */
+.banner-auth {
+  display: flex;
+  min-height: 100vh;
+}
+
+.banner-left, .banner-right {
+  flex: 1;
+  padding: 2rem;
+}
+
+.banner-left {
+  background: radial-gradient(circle at top left, var(--accent-blue), transparent 70%),
+              linear-gradient(#050505, #000);
+  font-size: 1.3rem;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.banner-left img {
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 1.5rem;
+}
+
+.banner-left h1 {
+  font-size: 2.2rem;
+  margin-bottom: 1.5rem;
+}
+
+.duoc-msg {
+  display: inline-block;
+  margin-top: 1rem;
+  font-weight: 600;
+  color: var(--accent-blue);
+}
+
+.banner-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* =========================
+   Auth Box
+   ========================= */
+.auth-box {
+  width: 100%;
+  max-width: 400px;
+  padding: 2rem;
+  border-radius: 1rem;
+}
+
+/* =========================
+   Botones
+   ========================= */
+.btn-accent {
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+  border: none;
+  color: #000;
+  font-weight: 700;
+  transition: all 0.3s ease;
+}
+
+.btn-accent:hover {
+  filter: brightness(1.1);
+}
+
+.btn-outline-light {
+  color: #fff;
+  border-color: rgba(255,255,255,0.3);
+}
+
+.btn-outline-light:hover {
+  background-color: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+.btn-neon-accent {
+  background: linear-gradient(90deg, var(--accent-green), var(--accent-blue));
+  color: #000;
+  font-weight: 700;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 0.8rem;
+  transition: all 0.3s ease;
+}
+
+.btn-neon-accent:hover {
+  filter: brightness(1.05);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.btn-ver {
+  background-color: #FF3B3B;
+  color: #fff;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+  transition: all 0.3s ease;
+}
+
+.btn-ver:hover,
+.btn-ver:focus,
+.btn-ver:active {
+  background-color: #FF1A1A;
+  color: #fff;
+  box-shadow: 0 0 8px #FF3B3B;
+  filter: brightness(1.15);
+}
+
+.btn-compartir {
+  background-color: var(--accent-green) !important;
+  color: #000 !important;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+  transition: all 0.3s ease;
+}
+
+.btn-compartir:hover,
+.btn-compartir:focus,
+.btn-compartir:active {
+  background-color: var(--accent-green) !important;
+  color: #000 !important;
+  filter: brightness(1.15);
+  box-shadow: 0 0 10px var(--accent-green);
+}
+
+/* =========================
+   Enlaces y Neon
+   ========================= */
+a {
+  color: var(--accent-blue);
+  text-decoration: none;
+}
+
+.neon {
+  text-shadow: 0 0 6px var(--accent-blue), 0 0 12px rgba(30,144,255,0.4);
+}
+
+/* =========================
+   Cards
+   ========================= */
+.card {
+  background: #0d0d0d;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 20px rgba(30,144,255,0.25);
+}
+
+.card-img-container {
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 15px;
+  background: #0b0b0b;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.card-img-container img {
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+  display: block;
+  transition: transform 0.3s ease;
+}
+
+.card-img-container img:hover {
+  transform: scale(1.05);
+}
+
+.badge-neon {
+  background: rgba(57,255,20,0.15);
+  color: var(--accent-green);
+  border: 1px solid rgba(57,255,20,0.35);
+}
+
+.price {
+  color: var(--accent-green);
+  font-weight: 700;
+}
+
+/* =========================
+   Hero
+   ========================= */
+.hero {
+  background: radial-gradient(1200px 600px at 80% -10%, rgba(30,144,255,0.25), transparent 40%),
+              radial-gradient(1000px 500px at 10% -20%, rgba(57,255,20,0.18), transparent 40%),
+              linear-gradient(#050505,#000);
+}
+
+/* =========================
+   Tablas
+   ========================= */
+.custom-table,
+.custom-table th,
+.custom-table td,
+.custom-table tr {
+  background: rgba(255,255,255,0.03);
+  border: none;
+  color: #ddd;
+  border-radius: 5px;
+  transition: all 0.3s ease;
+}
+
+.custom-table th {
+  color: #aaa;
+  font-weight: 500;
+}
+
+.custom-table tr:hover {
+  background: rgba(30,144,255,0.08);
+  box-shadow: 0 2px 10px rgba(30,144,255,0.12);
+  transform: scale(1.01);
+}
+
+/* =========================
+   Carrito lateral
+   ========================= */
+.carrito-sidebar {
+  position: fixed;
+  top: 0;
+  right: -400px;
+  width: 350px;
+  height: 100%;
+  background-color: #111;
+  color: white;
+  z-index: 1050;
+  transition: right 0.3s ease;
+  box-shadow: -3px 0 10px rgba(0,0,0,0.5);
+  overflow-y: auto;
+}
+
+.carrito-sidebar.open {
+  right: 0;
+}
+
+.carrito-header {
+  border-bottom: 1px solid #444;
+}
+
+.carrito-body {
+  padding: 1rem;
+}
+
+.cart-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.cart-item img {
+  width: 80px;
+  height: auto;
+  object-fit: cover;
+  border-radius: 0.5rem;
+}
+
+.cart-item-info {
+  flex: 1;
+}
+
+.cart-item-acciones {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.cart-item-acciones button {
+  min-width: 32px;
+}
+
+/* =========================
+   Imagenes y contenedores
+   ========================= */
+.imagen-contenedor {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  background: #0b0b0b;
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.imagen-contenedor img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
+#detalleImagen {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  transition: transform 0.3s ease;
+}
+
+#detalleImagen:hover {
+  transform: scale(1.02);
+}
+
+/* =========================
+   Blog team nosotros
+   ========================= */
+   
+.team-card-img-container {
+  width: 310px;
+  height: 310px;
+  margin: 0 auto 15px;
+  overflow: hidden;
+  border-radius: 10px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.team-card-img-container img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+
+/* =========================
+   Blog cards
+   ========================= */
+.blog-card-img {
+  padding: 5px;
+  height: 250px;
+  overflow: hidden;
+}
+
+.blog-card-img img {
+  width: 100%;
+  height: 95%;
+  object-fit: cover;
+  border-radius: 10px;
+  display: block;
+}
+
+/* =========================
+   Ajustes responsive
+   ========================= */
+@media (max-width: 768px) {
+  .banner-auth {
+    flex-direction: column;
+  }
+
+  .banner-left, .banner-right {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding: 1.5rem;
+  }
+
+  .card-img-container {
+    height: 180px;
+  }
+}
+
+@media (min-width: 768px) {
+  .card-img-container {
+    height: 220px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .card-img-container {
+    height: 260px;
+  }
+}
