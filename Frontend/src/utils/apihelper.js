@@ -1,14 +1,12 @@
 // apihelper.js
-// http://localhost:8082/swagger-ui/index.html
 
+// URL directa a tu backend en la EC2 (para las rutas que NO están en AWS API Gateway)
+const BACKEND_URL = "http://34.228.44.240:8082";
 
-// Definir la URL del backend según el entorno
-const BACKEND_URL =
-  import.meta.env.MODE === "development"
-    ? "http://localhost:8082"         // Backend local
-    : "https://tiendalevelup.netlify.app"; // Frontend en Netlify
+// URL de AWS API Gateway (la ruta securizada con JWT)
+const GATEWAY_URL = "https://h1m5l703rk.execute-api.us-east-1.amazonaws.com/Desarrollo";
 
-// Endpoints
+// Endpoints generales (apuntan a la EC2)
 export const API_USUARIOS = `${BACKEND_URL}/v2/usuarios`;
 export const API_PRODUCTOS = `${BACKEND_URL}/v2/productos`;
 export const API_CATEGORIAS = `${BACKEND_URL}/v2/categorias`;
@@ -16,7 +14,7 @@ export const API_CARRITO = `${BACKEND_URL}/v2/carrito`;
 export const API_BOLETAS = `${BACKEND_URL}/v2/boletas`;
 export const API_IMAGENES = `${BACKEND_URL}/v2/imagenes`;
 
-// Headers con JWT si existe
+// Headers con JWT si existe en localStorage
 export const getHeaders = () => {
   const token = localStorage.getItem("token");
   return {
@@ -25,29 +23,25 @@ export const getHeaders = () => {
   };
 };
 
-// IMAGENES
+// ================= IMAGENES =================
 
-// Obtener todas las imágenes
 export const getImagenes = async () => {
   const resp = await fetch(`${API_IMAGENES}/todas`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Error al obtener imágenes");
 };
 
-// Obtener imágenes por tipo (ej: 'nosotros', 'evento', 'logo')
 export const getImagenesPorTipo = async (tipo) => {
   const resp = await fetch(`${API_IMAGENES}/tipo/${tipo}`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject(`Error al obtener imágenes tipo ${tipo}`);
 };
 
-// Obtener imagen por ID
 export const getImagenPorId = async (id) => {
   const resp = await fetch(`${API_IMAGENES}/${id}`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Imagen no encontrada");
 };
 
-// USUARIOS 
+// ================= USUARIOS =================
 
-// Login
 export const loginUsuario = async (email, password) => {
   const resp = await fetch(`${API_USUARIOS}/login`, {
     method: "POST",
@@ -63,14 +57,13 @@ export const loginUsuario = async (email, password) => {
 
   const data = await resp.json();
 
-  // 🔐 GUARDAR JWT Y USUARIO
+  // GUARDAR JWT Y USUARIO
   localStorage.setItem("token", data.token);
   localStorage.setItem("usuario", JSON.stringify(data.usuario));
 
   return data.usuario;
 };
 
-// Crear usuario
 export const crearUsuario = async (data) => {
   const resp = await fetch(`${API_USUARIOS}/crear`, {
     method: "POST",
@@ -87,7 +80,6 @@ export const crearUsuario = async (data) => {
   return await resp.json();
 };
 
-// Crear múltiples usuarios
 export const crearUsuarios = async (usuarios) => {
   const resp = await fetch(`${API_USUARIOS}/crear/lista`, {
     method: "POST",
@@ -97,13 +89,11 @@ export const crearUsuarios = async (usuarios) => {
   return resp.ok ? resp.json() : Promise.reject("Error al crear usuarios");
 };
 
-// Obtener todos los usuarios
 export const getUsuarios = async () => {
   const resp = await fetch(`${API_USUARIOS}/todos`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Error al obtener usuarios");
 };
 
-// Buscar usuario
 export const getUsuarioPorId = async (usuarioId) => {
   const resp = await fetch(`${API_USUARIOS}/buscar/id/${usuarioId}`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Usuario no encontrado");
@@ -124,7 +114,6 @@ export const getUsuarioPorNombre = async (nombre) => {
   return resp.ok ? resp.json() : Promise.reject("Usuario no encontrado");
 };
 
-// Actualizar usuario
 export const updateUsuario = async (data) => {
   const resp = await fetch(`${API_USUARIOS}/actualizar`, {
     method: "PUT",
@@ -134,7 +123,6 @@ export const updateUsuario = async (data) => {
   return resp.ok ? resp.json() : Promise.reject("Error al actualizar usuario");
 };
 
-// Eliminar usuario
 export const deleteUsuario = async (usuarioId) => {
   const resp = await fetch(`${API_USUARIOS}/eliminar/id/${usuarioId}`, {
     method: "DELETE",
@@ -151,7 +139,7 @@ export const deleteUsuarioPorRut = async (rut) => {
   return resp.ok ? true : Promise.reject("Error al eliminar usuario");
 };
 
-// PRODUCTOS
+// ================= PRODUCTOS =================
 
 export const crearProducto = async (data) => {
   const resp = await fetch(`${API_PRODUCTOS}/crear`, {
@@ -162,8 +150,9 @@ export const crearProducto = async (data) => {
   return resp.ok ? resp.json() : Promise.reject("Error al crear producto");
 };
 
+// ÚNICA RUTA QUE PASA POR AWS API GATEWAY PARA LA EVALUACIÓN
 export const getProductos = async () => {
-  const resp = await fetch(`${API_PRODUCTOS}/todos`, { headers: getHeaders() });
+  const resp = await fetch(`${GATEWAY_URL}/v2/productos/todos`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Error al obtener productos");
 };
 
@@ -194,7 +183,7 @@ export const deleteProducto = async (id) => {
   return resp.ok ? true : Promise.reject("Error al eliminar producto");
 };
 
-// CATEGORÍAS
+// ================= CATEGORÍAS =================
 
 export const crearCategoria = async (data) => {
   const resp = await fetch(`${API_CATEGORIAS}/crear`, {
@@ -237,7 +226,7 @@ export const deleteCategoria = async (id) => {
   return resp.ok ? true : Promise.reject("Error al eliminar categoría");
 };
 
-// CARRITO 
+// ================= CARRITO =================
 
 export const obtenerCarrito = async (usuarioId) => {
   const resp = await fetch(`${API_CARRITO}/${usuarioId}`, { headers: getHeaders() });
@@ -276,7 +265,7 @@ export const eliminarItemCarrito = async (usuarioId, itemId) => {
   return resp.ok ? resp.json() : Promise.reject("Error al eliminar item del carrito");
 };
 
-// BOLETAS 
+// ================= BOLETAS =================
 
 export const generarBoleta = async (usuarioId) => {
   const resp = await fetch(`${API_BOLETAS}/generar/${usuarioId}`, {
