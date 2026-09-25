@@ -1,15 +1,12 @@
-// apihelper.js
 
-// URL directa a tu backend en la EC2 (para las rutas que NO están en AWS API Gateway)
-const BACKEND_URL = "http://34.228.44.240:8082";
 
-// URL de AWS API Gateway (la ruta securizada con JWT)
+const BACKEND_URL = "http://54.145.20.191:8082";
 const GATEWAY_URL = "https://h1m5l703rk.execute-api.us-east-1.amazonaws.com/Desarrollo";
 
-// Endpoints generales (apuntan a la EC2)
+// Endpoints
 export const API_USUARIOS = `${BACKEND_URL}/v2/usuarios`;
-export const API_PRODUCTOS = `${BACKEND_URL}/v2/productos`;
-export const API_CATEGORIAS = `${BACKEND_URL}/v2/categorias`;
+export const API_PRODUCTOS = `${GATEWAY_URL}/v2/productos`; // Ruta por Gateway con JWT
+export const API_CATEGORIAS = `${BACKEND_URL}/v2/categorias`; // Directo a la EC2
 export const API_CARRITO = `${BACKEND_URL}/v2/carrito`;
 export const API_BOLETAS = `${BACKEND_URL}/v2/boletas`;
 export const API_IMAGENES = `${BACKEND_URL}/v2/imagenes`;
@@ -46,7 +43,7 @@ export const loginUsuario = async (email, password) => {
   const resp = await fetch(`${API_USUARIOS}/login`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ email, password }),
   });
@@ -57,9 +54,8 @@ export const loginUsuario = async (email, password) => {
 
   const data = await resp.json();
 
-  // GUARDAR JWT Y USUARIO
-  localStorage.setItem("token", data.token);
-  localStorage.setItem("usuario", JSON.stringify(data.usuario));
+  if (data.token) localStorage.setItem("token", data.token);
+  if (data.usuario) localStorage.setItem("usuario", JSON.stringify(data.usuario));
 
   return data.usuario;
 };
@@ -68,7 +64,7 @@ export const crearUsuario = async (data) => {
   const resp = await fetch(`${API_USUARIOS}/crear`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(data),
   });
@@ -150,9 +146,8 @@ export const crearProducto = async (data) => {
   return resp.ok ? resp.json() : Promise.reject("Error al crear producto");
 };
 
-// ÚNICA RUTA QUE PASA POR AWS API GATEWAY PARA LA EVALUACIÓN
 export const getProductos = async () => {
-  const resp = await fetch(`${GATEWAY_URL}/v2/productos/todos`, { headers: getHeaders() });
+  const resp = await fetch(`${API_PRODUCTOS}/todos`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Error al obtener productos");
 };
 
@@ -229,11 +224,13 @@ export const deleteCategoria = async (id) => {
 // ================= CARRITO =================
 
 export const obtenerCarrito = async (usuarioId) => {
+  if (!usuarioId) return { items: [] };
   const resp = await fetch(`${API_CARRITO}/${usuarioId}`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Error al obtener carrito");
 };
 
 export const agregarAlCarrito = async (usuarioId, productoId, cantidad) => {
+  if (!usuarioId) return Promise.reject("Usuario no definido");
   const resp = await fetch(`${API_CARRITO}/${usuarioId}/agregar/${productoId}?cantidad=${cantidad}`, {
     method: "POST",
     headers: getHeaders(),
@@ -242,6 +239,7 @@ export const agregarAlCarrito = async (usuarioId, productoId, cantidad) => {
 };
 
 export const vaciarCarrito = async (usuarioId) => {
+  if (!usuarioId) return false;
   const resp = await fetch(`${API_CARRITO}/${usuarioId}/vaciar`, {
     method: "DELETE",
     headers: getHeaders(),
@@ -250,6 +248,7 @@ export const vaciarCarrito = async (usuarioId) => {
 };
 
 export const actualizarItemCarrito = async (usuarioId, itemId, cantidad) => {
+  if (!usuarioId) return Promise.reject("Usuario no definido");
   const resp = await fetch(`${API_CARRITO}/${usuarioId}/item/${itemId}?cantidad=${cantidad}`, {
     method: "PUT",
     headers: getHeaders(),
@@ -258,6 +257,7 @@ export const actualizarItemCarrito = async (usuarioId, itemId, cantidad) => {
 };
 
 export const eliminarItemCarrito = async (usuarioId, itemId) => {
+  if (!usuarioId) return Promise.reject("Usuario no definido");
   const resp = await fetch(`${API_CARRITO}/${usuarioId}/item/${itemId}`, {
     method: "DELETE",
     headers: getHeaders(),
@@ -268,6 +268,7 @@ export const eliminarItemCarrito = async (usuarioId, itemId) => {
 // ================= BOLETAS =================
 
 export const generarBoleta = async (usuarioId) => {
+  if (!usuarioId) return Promise.reject("Usuario no definido");
   const resp = await fetch(`${API_BOLETAS}/generar/${usuarioId}`, {
     method: "POST",
     headers: getHeaders(),
@@ -281,6 +282,7 @@ export const getBoletaPorId = async (id) => {
 };
 
 export const getBoletasPorUsuario = async (usuarioId) => {
+  if (!usuarioId) return [];
   const resp = await fetch(`${API_BOLETAS}/usuario/${usuarioId}`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Error al obtener historial de boletas");
 };

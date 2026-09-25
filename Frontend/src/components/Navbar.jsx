@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { getProductos, getCategorias } from "../utils/apihelper";
+import { useMsal, useIsAuthenticated } from "@azure/msal-react";
+import { loginRequest } from "../authConfig";
 
 function Navbar({ cantidad, abrirCarrito, usuario }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -15,9 +17,39 @@ function Navbar({ cantidad, abrirCarrito, usuario }) {
   const usuarioRef = useRef(null);
   const navRef = useRef(null);
 
+  // MSAL Hooks
+  const { instance, accounts } = useMsal();
+  const isAuthenticated = useIsAuthenticated();
+
   const toggleMenu = () => setMenuOpen(!menuOpen);
   const toggleProductos = () => setProductosOpen(!productosOpen);
   const toggleUsuario = () => setUsuarioOpen(!usuarioOpen);
+
+  // Iniciar sesión con redirección (sin popups ni pestañas duplicadas)
+  const handleLoginAzure = () => {
+    instance.loginRedirect(loginRequest);
+  };
+
+  // Cerrar sesión
+  const handleLogoutAzure = () => {
+    const carritoLS = JSON.parse(localStorage.getItem("carrito")) || [];
+    carritoLS.forEach((item) => {
+      const stockActual = Number(localStorage.getItem(`stock_${item.id}`)) || 0;
+      localStorage.setItem(`stock_${item.id}`, stockActual + item.cantidad);
+    });
+    localStorage.removeItem("carrito");
+    localStorage.removeItem("usuario");
+    localStorage.removeItem("token");
+
+    setUsuarioActual(null);
+    setUsuarioOpen(false);
+    window.dispatchEvent(new Event("usuarioCambiado"));
+    window.dispatchEvent(new Event("carritoCambiado"));
+
+    instance.logoutRedirect({
+      postLogoutRedirectUri: "/",
+    });
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -28,7 +60,6 @@ function Navbar({ cantidad, abrirCarrito, usuario }) {
         setProductos(Array.isArray(prods) ? prods : []);
         setCategorias(Array.isArray(cats) ? cats : []);
 
-        // Mapear imagen de producto por categoría
         const mapImg = {};
         cats.forEach((cat) => {
           const prodCat = prods.find(
@@ -47,7 +78,6 @@ function Navbar({ cantidad, abrirCarrito, usuario }) {
     fetchData();
   }, []);
 
-  // Cerrar dropdowns al hacer click afuera
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target))
@@ -70,6 +100,11 @@ function Navbar({ cantidad, abrirCarrito, usuario }) {
     return () =>
       window.removeEventListener("usuarioCambiado", handleUsuarioCambiado);
   }, []);
+
+  const nombreUsuario =
+    isAuthenticated && accounts.length > 0
+      ? accounts[0].name
+      : usuarioActual?.nombre || "Invitado";
 
   return (
     <nav
@@ -95,7 +130,6 @@ function Navbar({ cantidad, abrirCarrito, usuario }) {
 
         <div className={`collapse navbar-collapse ${menuOpen ? "show" : ""}`} id="nav">
           <ul className="navbar-nav me-auto mb-2 mb-lg-0">
-            {/* Dropdown de categorías */}
             <li className="nav-item position-relative" ref={dropdownRef}>
               <button
                 className="nav-link btn btn-link text-decoration-none"
@@ -159,7 +193,6 @@ function Navbar({ cantidad, abrirCarrito, usuario }) {
               )}
             </li>
 
-            {/* Links fijos */}
             <li className="nav-item"><Link className="nav-link neon-link" to="/ofertas">🔥 Ofertas</Link></li>
             <li className="nav-item"><Link className="nav-link" to="/blog">Blog</Link></li>
             <li className="nav-item"><Link className="nav-link" to="/eventos">Eventos</Link></li>
@@ -167,7 +200,6 @@ function Navbar({ cantidad, abrirCarrito, usuario }) {
             <li className="nav-item"><Link className="nav-link" to="/nosotros">Nosotros</Link></li>
           </ul>
 
-          {/* Carrito y usuario */}
           <div className="d-flex gap-2 align-items-center position-relative">
             <button className="btn btn-accent position-relative" onClick={abrirCarrito}>
               <i className="bi bi-cart3"></i>
@@ -178,7 +210,6 @@ function Navbar({ cantidad, abrirCarrito, usuario }) {
               )}
             </button>
 
-            {/* Usuario dropdown */}
             <div className="position-relative" ref={usuarioRef}>
               <button
                 className="btn text-white"
@@ -190,23 +221,31 @@ function Navbar({ cantidad, abrirCarrito, usuario }) {
                   borderRadius: "6px",
                 }}
               >
-                {usuarioActual?.nombre || "Invitado"}
+                <i className="bi bi-microsoft me-1"></i> {nombreUsuario}
                 <i className="bi bi-caret-down-fill ms-1"></i>
               </button>
 
               {usuarioOpen && (
                 <div
                   className="position-absolute bg-dark p-2 rounded shadow"
-                  style={{ top: "110%", right: 0, minWidth: "150px", zIndex: 3000 }}
+                  style={{ top: "110%", right: 0, minWidth: "160px", zIndex: 3000 }}
                 >
-                  {!usuarioActual ? (
-                    <>
-                      <Link to="/auth" className="dropdown-item text-white p-2 hover-neon" onClick={() => setUsuarioOpen(false)}>Iniciar sesión</Link>
-                      <Link to="/auth" className="dropdown-item text-white p-2 hover-neon" onClick={() => setUsuarioOpen(false)}>Registrarse</Link>
-                    </>
+                  {!usuarioActual && !isAuthenticated ? (
+                    <button
+                      className="dropdown-item text-white p-2 hover-neon w-100 text-start bg-transparent border-0"
+                      onClick={handleLoginAzure}
+                    >
+                      Iniciar sesión (Azure)
+                    </button>
                   ) : (
                     <>
-                      <Link to="/perfil" className="dropdown-item text-white p-2 hover-neon" onClick={() => setUsuarioOpen(false)}>Perfil</Link>
+                      <Link
+                        to="/perfil"
+                        className="dropdown-item text-white p-2 hover-neon"
+                        onClick={() => setUsuarioOpen(false)}
+                      >
+                        Perfil
+                      </Link>
                       {usuarioActual?.rol?.toLowerCase() === "admin" && (
                         <Link
                           to="/homeadmin"
@@ -217,18 +256,12 @@ function Navbar({ cantidad, abrirCarrito, usuario }) {
                         </Link>
                       )}
 
-                      <button className="dropdown-item text-white p-2 hover-neon w-100 text-start" onClick={() => {
-                        const carritoLS = JSON.parse(localStorage.getItem("carrito")) || [];
-                        carritoLS.forEach((item) => {
-                          const stockActual = Number(localStorage.getItem(`stock_${item.id}`)) || 0;
-                          localStorage.setItem(`stock_${item.id}`, stockActual + item.cantidad);
-                        });
-                        localStorage.removeItem("carrito");
-                        localStorage.removeItem("usuario");
-                        window.dispatchEvent(new Event("usuarioCambiado"));
-                        window.dispatchEvent(new Event("carritoCambiado"));
-                        window.location.href = "/";
-                      }}>Cerrar sesión</button>
+                      <button
+                        className="dropdown-item text-white p-2 hover-neon w-100 text-start bg-transparent border-0"
+                        onClick={handleLogoutAzure}
+                      >
+                        Cerrar sesión
+                      </button>
                     </>
                   )}
                 </div>

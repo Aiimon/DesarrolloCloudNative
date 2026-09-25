@@ -100,52 +100,57 @@ function Layout() {
     });
 
   // Cargar carrito
-  useEffect(() => {
-    if (usuario) {
-      const fetchCarrito = async () => {
-        try {
-          const carritoData = await obtenerCarrito(usuario.usuarioId);
-          const productosAPI = await getProductos();
+    useEffect(() => {
+      // Validamos que exista el usuario Y que tenga un usuarioId o id definido
+      const idUsuario = usuario?.usuarioId || usuario?.id;
 
-          const items = Array.isArray(carritoData)
-            ? carritoData
-            : Array.isArray(carritoData?.items)
-              ? carritoData.items
-              : [];
+      if (idUsuario) {
+        const fetchCarrito = async () => {
+          try {
+            const carritoData = await obtenerCarrito(idUsuario);
+            const productosAPI = await getProductos();
 
-          setCarrito(normalizarCarrito(items, productosAPI));
-        } catch (err) {
-          console.error("Error al obtener carrito:", err);
-          setCarrito([]);
-        }
-      };
-      fetchCarrito();
-    } else {
-      setCarrito([]);
-    }
-  }, [usuario]);
+            const items = Array.isArray(carritoData)
+              ? carritoData
+              : Array.isArray(carritoData?.items)
+                ? carritoData.items
+                : [];
 
+            setCarrito(normalizarCarrito(items, productosAPI));
+          } catch (err) {
+            console.error("Error al obtener carrito:", err);
+            setCarrito([]);
+          }
+        };
+        fetchCarrito();
+      } else {
+        // Si es un usuario federado sin ID en base de datos o invitado, el carrito se mantiene vacío o local
+        setCarrito([]);
+      }
+    }, [usuario]);
   // Agregar al carrito
   const handleAgregarCarrito = async (producto) => {
-    if (!usuario) return alert("Debes iniciar sesión para agregar al carrito");
-    if (producto.stock <= 0) return alert("El producto está agotado");
+      if (!usuario) return alert("Debes iniciar sesión para agregar al carrito");
+      if (producto.stock <= 0) return alert("El producto está agotado");
 
-    try {
-      const carritoActualizado = await agregarAlCarrito(usuario.usuarioId, producto.id, 1);
-      const productosAPI = await getProductos();
-      const items = carritoActualizado.items || [...carrito, { ...producto, cantidad: 1 }];
+      const idUsuario = usuario.usuarioId || usuario.id || 1; // Fallback al id 1 si viene de Azure
 
-      setCarrito(normalizarCarrito(items, productosAPI));
+      try {
+        const carritoActualizado = await agregarAlCarrito(idUsuario, producto.id, 1);
+        const productosAPI = await getProductos();
+        const items = carritoActualizado.items || [...carrito, { ...producto, cantidad: 1 }];
 
-      // Reducir stock local
-      setProductos(prev =>
-        prev.map(p => p.id === producto.id ? { ...p, stock: p.stock - 1 } : p)
-      );
-    } catch (error) {
-      console.error("Error agregando al carrito:", error);
-      alert("No se pudo agregar el producto al carrito");
-    }
-  };
+        setCarrito(normalizarCarrito(items, productosAPI));
+
+        // Reducir stock local
+        setProductos(prev =>
+          prev.map(p => p.id === producto.id ? { ...p, stock: p.stock - 1 } : p)
+        );
+      } catch (error) {
+        console.error("Error agregando al carrito:", error);
+        alert("No se pudo agregar el producto al carrito");
+      }
+    };
 
   // Actualizar cantidad
   const actualizarCantidadCarrito = async (productoId, nuevaCantidad) => {

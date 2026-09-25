@@ -1,43 +1,63 @@
-import 'bootstrap/dist/css/bootstrap.min.css'
+import 'bootstrap/dist/css/bootstrap.min.css';
 import "bootstrap-icons/font/bootstrap-icons.css";
 import './index.css';
 import './App.css';
-import App from './App.jsx'
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import App from './App.jsx';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
+import { PublicClientApplication } from "@azure/msal-browser";
+import { MsalProvider } from "@azure/msal-react";
+import { msalConfig, loginRequest } from "./authConfig";
 
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-    
-  </StrictMode>,
-)
+const msalInstance = new PublicClientApplication(msalConfig);
 
+msalInstance.initialize().then(async () => {
+  try {
+    // 1. Procesar el resultado de la redirección
+    const redirectResponse = await msalInstance.handleRedirectPromise();
 
-/* IMPORTS
+    // 2. Determinar la cuenta activa
+    let account = redirectResponse?.account || msalInstance.getAllAccounts()[0];
 
-npm install react react-dom
-npm install leaflet
-npm install @fontsource/roboto @fontsource/orbitron
-npm install --save-dev vitest @testing-library/react @testing-library/jest-dom @testing-library/user-event jsdom
-npm install @paypal/react-paypal-js
-npm install crypto-js
-npm install sweetalert2
+    if (account) {
+      msalInstance.setActiveAccount(account);
 
+      // 3. Adquirir explícitamente el token para la API de Pedidos360
+      try {
+        const tokenResponse = await msalInstance.acquireTokenSilent({
+          ...loginRequest,
+          account: account,
+        });
 
-paypal
+        if (tokenResponse?.accessToken) {
+          localStorage.setItem("token", tokenResponse.accessToken);
+        }
+      } catch (tokenErr) {
+        console.warn("Silent token falló en main.jsx:", tokenErr);
+      }
 
-sb-wxuwa47149727@personal.example.com
+      // 4. Guardar datos de usuario para el navbar/perfil
+      const usuarioAzure = {
+        nombre: account.name || account.username,
+        email: account.username,
+        rol: "Cliente",
+      };
+      localStorage.setItem("usuario", JSON.stringify(usuarioAzure));
+    }
+  } catch (err) {
+    console.error("Error inicializando autenticación MSAL:", err);
+  }
 
-{b^9Mv<*
-
-Para ver los test exitosos o fallidos (En CMD)
-
-npx vitest run --reporter verbose 2>nul
-
-
-*/
+  // Renderizar la aplicación una vez asegurado el token
+  createRoot(document.getElementById('root')).render(
+    <StrictMode>
+      <MsalProvider instance={msalInstance}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </MsalProvider>
+    </StrictMode>
+  );
+});
