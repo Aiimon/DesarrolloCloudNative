@@ -5,6 +5,18 @@ import BuscadorAvanzado from "../components/BuscadorAvanzado";
 import Footer from "../components/Footer";
 import { getCategorias } from "../utils/apihelper";
 
+// Helper para obtener la entidad del usuario tolerante a Tenant
+const obtenerUsuarioLS = () => {
+  try {
+    const stored = localStorage.getItem("usuario");
+    if (!stored) return null;
+    const parsed = JSON.parse(stored);
+    return parsed?.usuario || parsed?.user || parsed?.data || parsed;
+  } catch (e) {
+    return null;
+  }
+};
+
 function Categoria({ usuario, onAgregarCarrito, productos }) {
   const location = useLocation();
   const params = new URLSearchParams(location.search);
@@ -30,7 +42,6 @@ function Categoria({ usuario, onAgregarCarrito, productos }) {
     const fetchCategorias = async () => {
       try {
         const cats = await getCategorias();
-        // Eliminar duplicados y siempre agregar "Todas" al inicio
         const categoriasUnicas = [
           { id: "todas", nombre: "Todas" },
           ...[...new Map(cats.map(c => [c.nombre, c])).values()].filter(c => c.nombre !== "Todas")
@@ -44,16 +55,21 @@ function Categoria({ usuario, onAgregarCarrito, productos }) {
   }, []);
 
   const handleAgregar = (producto) => {
-    if (!usuario?.usuarioId) {
+    // Buscar usuario activo recibiéndolo por props o leyendo directamente del LocalStorage
+    const usuarioActivo = usuario || obtenerUsuarioLS();
+    const idUsuario = usuarioActivo?.usuarioId || usuarioActivo?.id || usuarioActivo?.userId;
+
+    if (!usuarioActivo && !idUsuario) {
       setMensaje("🔒 Debes iniciar sesión para agregar productos al carrito.");
       return;
     }
+
     if (producto.stock <= 0) {
       setMensaje("⚠️ El producto está agotado.");
       return;
     }
 
-    onAgregarCarrito(producto); // <- enviar el objeto completo
+    onAgregarCarrito(producto);
     setMensaje(`✅ Se agregó "${producto.nombre}" al carrito.`);
     setTimeout(() => setMensaje(""), 3000);
   };
@@ -94,7 +110,7 @@ function Categoria({ usuario, onAgregarCarrito, productos }) {
               <div className="col-md-4" key={prod.id}>
                 <ProductoCard
                   producto={prod}
-                  usuario={usuario}
+                  usuario={usuario || obtenerUsuarioLS()}
                   onAgregarCarrito={() => handleAgregar(prod)}
                 />
               </div>

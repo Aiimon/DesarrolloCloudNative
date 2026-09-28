@@ -1,5 +1,14 @@
 import { useNavigate } from "react-router-dom";
 
+// Helper para resolver la URL de la imagen
+const resolverImagen = (img) => {
+  if (!img) return "/placeholder.png";
+  if (img.startsWith("http://") || img.startsWith("https://") || img.startsWith("data:")) {
+    return img;
+  }
+  return img.startsWith("/") ? img : `/${img}`;
+};
+
 function CarritoSidebar({ abierto, cerrar, carrito = [], onActualizarCantidad, onEliminarItem }) {
   const navigate = useNavigate();
 
@@ -37,7 +46,7 @@ function CarritoSidebar({ abierto, cerrar, carrito = [], onActualizarCantidad, o
           width: "100vw",
           height: "100vh",
           backgroundColor: "rgba(0,0,0,0.4)",
-          zIndex: 1050
+          zIndex: 1050,
         }}
         onClick={cerrar}
       />
@@ -57,7 +66,7 @@ function CarritoSidebar({ abierto, cerrar, carrito = [], onActualizarCantidad, o
           overflowY: "auto",
           padding: "1rem",
           transition: "transform 0.3s ease",
-          transform: abierto ? "translateX(0)" : "translateX(100%)"
+          transform: abierto ? "translateX(0)" : "translateX(100%)",
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -80,11 +89,15 @@ function CarritoSidebar({ abierto, cerrar, carrito = [], onActualizarCantidad, o
               const stockMax = p.stock;
 
               return (
-                <div key={p.id} className="d-flex align-items-center justify-content-between mb-3">
+                <div key={p.productoId || p.id} className="d-flex align-items-center justify-content-between mb-3">
                   <img
-                    src={p.imagen.startsWith("/") ? p.imagen : `/${p.imagen}`}
+                    src={resolverImagen(p.imagen)}
                     alt={p.nombre}
-                    style={{ width: 50, height: 50, objectFit: "contain", marginRight: 10 }}
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = "https://placehold.co/50x50?text=IMG";
+                    }}
+                    style={{ width: 50, height: 50, objectFit: "contain", marginRight: 10, borderRadius: 4 }}
                   />
                   <div className="flex-grow-1">
                     <span>{p.nombre}</span>
@@ -99,7 +112,7 @@ function CarritoSidebar({ abierto, cerrar, carrito = [], onActualizarCantidad, o
                       <button
                         className="btn btn-sm btn-outline-light"
                         onClick={() => onActualizarCantidad(p.productoId, p.cantidad + 1)}
-                        disabled={p.cantidad >= stockMax}
+                        disabled={stockMax > 0 && p.cantidad >= stockMax}
                       >
                         +
                       </button>
@@ -122,7 +135,10 @@ function CarritoSidebar({ abierto, cerrar, carrito = [], onActualizarCantidad, o
 
             <button
               className="btn btn-success w-100 mt-2"
-              onClick={() => navigate("/carro")}
+              onClick={() => {
+                cerrar();
+                navigate("/carro");
+              }}
             >
               Ver Carrito
             </button>

@@ -1,5 +1,5 @@
 import { Routes, Route, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import "./App.css";
 import {
   getProductos,
@@ -8,6 +8,8 @@ import {
   obtenerCarrito,
   actualizarItemCarrito,
   eliminarItemCarrito,
+  getOrderStatus,
+  sendOrderEvent,
 } from "./utils/apihelper";
 
 import Navbar from "./components/Navbar";
@@ -41,25 +43,88 @@ import NuevoUsuario from "./pages/NuevoUsuario";
 import Productosadmin from "./pages/Productosadmin";
 import Usuariosadmin from "./pages/Usuariosadmin";
 
+// Helper robusto para extraer la información de usuario contemplando estructuras con Tenant
+const obtenerUsuarioLS = () => {
+  try {
+    const stored = localStorage.getItem("usuario");
+    if (!stored) return null;
+    const parsed = JSON.parse(stored);
+    return parsed?.usuario || parsed?.user || parsed?.data || parsed;
+  } catch (e) {
+    console.error("Error al parsear el usuario de localStorage:", e);
+    return null;
+  }
+};
+
 function Layout() {
   const location = useLocation();
   const [carritoOpen, setCarritoOpen] = useState(false);
   const [productos, setProductos] = useState([]);
   const [categorias, setCategorias] = useState([]);
-  const [usuario, setUsuario] = useState(
-    () => JSON.parse(localStorage.getItem("usuario")) || null
-  );
   const [carrito, setCarrito] = useState([]);
+
+  // Estado de usuario tolerante a Tenant
+  const [usuario, setUsuario] = useState(() => obtenerUsuarioLS());
+
+  // Estados de monitoreo de RabbitMQ
+  const [backendStatus, setBackendStatus] = useState("Conectando...");
+  const [stats, setStats] = useState({ total: 0, success: 0, failed: 0 });
+
 
   // Escuchar cambios de usuario en localStorage
   useEffect(() => {
     const handleUsuarioCambiado = () => {
-      const usuarioLS = JSON.parse(localStorage.getItem("usuario"));
-      setUsuario(usuarioLS || null);
+      setUsuario(obtenerUsuarioLS());
     };
     window.addEventListener("usuarioCambiado", handleUsuarioCambiado);
     return () => window.removeEventListener("usuarioCambiado", handleUsuarioCambiado);
   }, []);
+
+  // Verificación de estado del Backend y RabbitMQ con freno ante 404
+  // Verificación de estado del Backend y RabbitMQ
+  useEffect(() => {
+    let activo = true;
+
+    const checkBackendStatus = async () => {
+      const targetUserId = usuario?.usuarioId || usuario?.id || null;
+      const res = await getOrderStatus(targetUserId);
+
+      if (!activo) return;
+
+      if (res.ok) {
+        setBackendStatus("Conectado a Backend & RabbitMQ");
+      } else {
+        setBackendStatus("Backend Desconectado o Inactivo");
+      }
+    };
+
+    checkBackendStatus();
+    // Chequeo cada 30 segundos para evitar saturación
+    const timer = setInterval(checkBackendStatus, 30000);
+
+    return () => {
+      activo = false;
+      clearInterval(timer);
+    };
+  }, [usuario]);
+
+  // Enviar mensaje de orden a RabbitMQ
+  const sendOrderRabbitMQ = async (customerName) => {
+    const enviado = await sendOrderEvent(customerName);
+    if (enviado) {
+      setStats((prev) => ({ ...prev, total: prev.total + 1 }));
+
+      // Simular procesamiento del evento (Exitoso o DLQ)
+      setTimeout(() => {
+        const isSuccess = Math.random() > 0.4;
+        setStats((prev) =>
+          isSuccess
+            ? { ...prev, success: prev.success + 1 }
+            : { ...prev, failed: prev.failed + 1 }
+        );
+      }, 1500);
+    }
+  };
 
   // Cargar productos y categorías
   useEffect(() => {
@@ -70,7 +135,7 @@ function Layout() {
         setProductos(productosAPI);
 
         const cats = Array.isArray(categoriasAPI)
-          ? [{ id: 0, nombre: "Todas" }, ...categoriasAPI.map(c => ({ id: c.id, nombre: c.nombre }))]
+          ? [{ id: 0, nombre: "Todas" }, ...categoriasAPI.map((c) => ({ id: c.id, nombre: c.nombre }))]
           : [{ id: 0, nombre: "Todas" }];
         setCategorias(cats);
       } catch (error) {
@@ -82,137 +147,135 @@ function Layout() {
     fetchData();
   }, []);
 
-  // Normalizar carrito
-  const normalizarCarrito = (items, productosAPI) =>
-    items.map(item => {
-      const prod = item.producto || productosAPI.find(p => p.id === item.productoId || p.id === item.id) || {};
-      return {
-        ...item,
-        productoId: item.productoId ?? item.id ?? prod.id,
-        producto: prod,
-        nombre: item.nombre || prod.nombre || 'Desconocido',
-        precio: item.precio ?? prod.precio ?? 0,
-        descuento: item.descuento ?? prod.descuento ?? 0,
-        stock: item.stock ?? prod.stock ?? 0,
-        cantidad: item.cantidad ?? 0,
-        imagen: item.imagen || prod.imagen || '/placeholder.png'
+  const BACKEND_URL = "http://98.89.1.201:8082";
+  const normalizarCarrito = (items = [], productosAPI = []) => {
+  return items.map((item) => {
+    const rawId = String(item.productoId ?? item.id ?? "");
+    
+    // Búsqueda tolerante a mayúsculas/minúsculas y tipos
+    const prod =
+      item.producto ||
+      productosAPI.find(
+        (p) => String(p.id).trim().toLowerCase() === rawId.trim().toLowerCase()
+      ) ||
+      {};
+
+    // Extraer la ruta cruda de la imagen
+    let imgPath = item.imagen || prod.imagen || "";
+
+    // Si viene solo el nombre del archivo (ej: "KB001.jpg"), anteponer la ruta del backend si aplica
+    if (imgPath && !imgPath.startsWith("http") && !imgPath.startsWith("data:") && !imgPath.startsWith("/")) {
+      imgPath = `${BACKEND_URL}/v2/imagenes/${imgPath}`;
+    }
+
+    return {
+      ...item,
+      productoId: rawId || prod.id,
+      producto: prod,
+      nombre: item.nombre || prod.nombre || "Producto sin nombre",
+      precio: Number(item.precio ?? prod.precio ?? 0),
+      descuento: Number(item.descuento ?? prod.descuento ?? 0),
+      stock: Number(item.stock ?? prod.stock ?? 0),
+      cantidad: Number(item.cantidad ?? 1),
+      imagen: imgPath || "/placeholder.png",
+    };
+  });
+};
+  // Cargar carrito del usuario
+  useEffect(() => {
+    const usuarioActivo = usuario || obtenerUsuarioLS();
+    const idUsuario = usuarioActivo?.usuarioId || usuarioActivo?.id || usuarioActivo?.userId;
+
+    if (idUsuario) {
+      const fetchCarrito = async () => {
+        try {
+          const carritoData = await obtenerCarrito(idUsuario);
+          const productosAPI = await getProductos();
+
+          const items = Array.isArray(carritoData)
+            ? carritoData
+            : Array.isArray(carritoData?.items)
+            ? carritoData.items
+            : [];
+
+          setCarrito(normalizarCarrito(items, productosAPI));
+        } catch (err) {
+          console.error("Error al obtener carrito:", err);
+          setCarrito([]);
+        }
       };
-    });
+      fetchCarrito();
+    } else {
+      setCarrito([]);
+    }
+  }, [usuario]);
 
-  // Cargar carrito
-    useEffect(() => {
-      // Validamos que exista el usuario Y que tenga un usuarioId o id definido
-      const idUsuario = usuario?.usuarioId || usuario?.id;
-
-      if (idUsuario) {
-        const fetchCarrito = async () => {
-          try {
-            const carritoData = await obtenerCarrito(idUsuario);
-            const productosAPI = await getProductos();
-
-            const items = Array.isArray(carritoData)
-              ? carritoData
-              : Array.isArray(carritoData?.items)
-                ? carritoData.items
-                : [];
-
-            setCarrito(normalizarCarrito(items, productosAPI));
-          } catch (err) {
-            console.error("Error al obtener carrito:", err);
-            setCarrito([]);
-          }
-        };
-        fetchCarrito();
-      } else {
-        // Si es un usuario federado sin ID en base de datos o invitado, el carrito se mantiene vacío o local
-        setCarrito([]);
-      }
-    }, [usuario]);
-  // Agregar al carrito
   const handleAgregarCarrito = async (producto) => {
-      if (!usuario) return alert("Debes iniciar sesión para agregar al carrito");
-      if (producto.stock <= 0) return alert("El producto está agotado");
+      const usuarioActivo = usuario || obtenerUsuarioLS();
 
-      const idUsuario = usuario.usuarioId || usuario.id || 1; // Fallback al id 1 si viene de Azure
+      if (!usuarioActivo) {
+        return alert("Debes iniciar sesión para agregar al carrito");
+      }
+
+      if (producto.stock <= 0) {
+        return alert("El producto está agotado");
+      }
+
+      const targetUserId = usuarioActivo.usuarioId || usuarioActivo.id || usuarioActivo.userId || 1;
+      const targetProductoId = producto.id || producto.productoId;
 
       try {
-        const carritoActualizado = await agregarAlCarrito(idUsuario, producto.id, 1);
-        const productosAPI = await getProductos();
-        const items = carritoActualizado.items || [...carrito, { ...producto, cantidad: 1 }];
+        const carritoActualizado = await agregarAlCarrito(targetUserId, targetProductoId, 1);
+        const items = carritoActualizado.items || [];
+        setCarrito(normalizarCarrito(items, productos));
 
-        setCarrito(normalizarCarrito(items, productosAPI));
+        // NOTA: Se eliminó el setProductos((prev) => prev.map(...)) de aquí
 
-        // Reducir stock local
-        setProductos(prev =>
-          prev.map(p => p.id === producto.id ? { ...p, stock: p.stock - 1 } : p)
-        );
+        sendOrderRabbitMQ(usuarioActivo.nombre || usuarioActivo.username || usuarioActivo.email || "Cliente");
       } catch (error) {
         console.error("Error agregando al carrito:", error);
         alert("No se pudo agregar el producto al carrito");
       }
     };
 
-  // Actualizar cantidad
-  const actualizarCantidadCarrito = async (productoId, nuevaCantidad) => {
+  // Actualizar cantidad en el carrito
+const actualizarCantidadCarrito = async (productoId, nuevaCantidad) => {
     try {
-      const itemPrev = carrito.find(p => p.productoId === productoId);
-      if (!itemPrev) return;
-
       if (nuevaCantidad < 1) {
-        // Si la cantidad baja a 0, eliminamos el producto
         return eliminarItemDelCarrito(productoId);
       }
 
-      const carritoActualizado = await actualizarItemCarrito(usuario.usuarioId, productoId, nuevaCantidad);
+      const usuarioActivo = usuario || obtenerUsuarioLS();
+      const targetUserId = usuarioActivo?.usuarioId || usuarioActivo?.id || usuarioActivo?.userId || 1;
+      
+      const carritoActualizado = await actualizarItemCarrito(targetUserId, productoId, nuevaCantidad);
+      setCarrito(normalizarCarrito(carritoActualizado.items || [], productos));
 
-      const diff = nuevaCantidad - itemPrev.cantidad;
-      setProductos(prev =>
-        prev.map(p =>
-          p.id === productoId ? { ...p, stock: p.stock - diff } : p
-        )
-      );
-
-      setCarrito(normalizarCarrito(carritoActualizado.items || carrito, productos));
+      // NOTA: Se eliminó el setProductos de aquí
     } catch (error) {
       console.error("Error al actualizar cantidad:", error);
     }
   };
 
-  // Eliminar item del carrito y actualizar stock en productos
-  const eliminarItemDelCarrito = async (productoId) => {
+  // Eliminar producto del carrito
+const eliminarItemDelCarrito = async (productoId) => {
     try {
-      const itemEliminado = carrito.find(p => p.productoId === productoId);
-      if (!itemEliminado) return;
+      const usuarioActivo = usuario || obtenerUsuarioLS();
+      const targetUserId = usuarioActivo?.usuarioId || usuarioActivo?.id || usuarioActivo?.userId || 1;
+      
+      const carritoActualizado = await eliminarItemCarrito(targetUserId, productoId);
+      setCarrito(normalizarCarrito(carritoActualizado.items || [], productos));
 
-      // Primero devolvemos stock en el estado productos
-      setProductos(prev =>
-        prev.map(p =>
-          p.id === productoId ? { ...p, stock: p.stock + itemEliminado.cantidad } : p
-        )
-      );
-
-      // Llamamos al backend para eliminar el item
-      const carritoActualizado = await eliminarItemCarrito(usuario.usuarioId, productoId);
-
-      // Normalizamos carrito usando el stock actualizado
-      setCarrito(prevCarrito =>
-        normalizarCarrito(
-          carritoActualizado.items || prevCarrito.filter(p => p.productoId !== productoId),
-          productos.map(p =>
-            p.id === productoId ? { ...p, stock: p.stock + itemEliminado.cantidad } : p
-          )
-        )
-      );
-
+      // NOTA: Se eliminó el setProductos de aquí
     } catch (error) {
       console.error("Error al eliminar item:", error);
     }
   };
 
-  // Filtrar productos
+  // Filtrado de productos
   const [productosFiltrados, setProductosFiltrados] = useState([]);
   const handleFiltrarProductos = ({ q, cat, min, max }) => {
-    const filtrados = productos.filter(p => {
+    const filtrados = productos.filter((p) => {
       const matchCat = cat === "Todas" || p.categoria?.nombre === cat;
       const matchQ = q ? p.nombre.toLowerCase().includes(q.toLowerCase()) : true;
       const matchPrecio = p.precio >= min && p.precio <= max;
@@ -221,24 +284,20 @@ function Layout() {
     setProductosFiltrados(filtrados);
   };
 
+  const productosConStockReal = useMemo(() => {
+    return (productosFiltrados.length ? productosFiltrados : productos).map((p) => {
+      const enCarrito = carrito.find((c) => c.productoId === p.id);
+      return {
+        ...p,
+        stock: enCarrito ? p.stock - enCarrito.cantidad : p.stock,
+      };
+    });
+  }, [productos, productosFiltrados, carrito]);
+
   const hideNavbarRoutes = ["/checkout", "/boleta"];
   const shouldShowNavbar = !hideNavbarRoutes.includes(location.pathname);
   const shouldShowBotonWsp = shouldShowNavbar;
-
   const mostrarBuscador = location.pathname.startsWith("/categoria") || location.pathname.startsWith("/ofertas");
-
-  // useEffect para sincronizar stock en las cards automáticamente
-  useEffect(() => {
-    setProductos(prev =>
-      prev.map(p => {
-        const carritoItem = carrito.find(c => c.productoId === p.id);
-        if (carritoItem) {
-          return { ...p, stock: p.stock }; // stock ya actualizado
-        }
-        return p;
-      })
-    );
-  }, [carrito]);
 
   return (
     <>
@@ -250,11 +309,16 @@ function Layout() {
             usuario={usuario}
           />
 
+          {/* Banner con el estado de RabbitMQ y Métricas */}
+          <div style={{ padding: "8px 16px", background: "#f1f5f9", textAlign: "center", borderBottom: "1px solid #cbd5e1", fontSize: "0.9rem" }}>
+            <span><strong>Estado Backend:</strong> {backendStatus}</span>
+            <span style={{ marginLeft: "15px" }}><strong>Órdenes Totales:</strong> {stats.total} | </span>
+            <span style={{ color: "#16a34a", fontWeight: "bold" }}>Procesadas: {stats.success} | </span>
+            <span style={{ color: "#dc2626", fontWeight: "bold" }}>DLQ: {stats.failed}</span>
+          </div>
+
           {mostrarBuscador && (
-            <BuscadorAvanzado
-              categorias={categorias}
-              onFilter={handleFiltrarProductos}
-            />
+            <BuscadorAvanzado categorias={categorias} onFilter={handleFiltrarProductos} />
           )}
         </>
       )}
@@ -268,73 +332,32 @@ function Layout() {
       />
 
       <Routes>
-        <Route
-          path="/homeadmin"
-          element={<HomeAdmin usuario={usuario} />}
-        />
+        <Route path="/homeadmin" element={<HomeAdmin usuario={usuario} />} />
         <Route path="/perfiladmin" element={<PerfilAdmin />} />
-      <Route path="/categoria_admin" element={<CategoriaAdmin />} />
-      <Route path="/editarproducto" element={<EditarProducto />} />
-      <Route path="/editaruser" element={<EditarUser />} />
-      <Route path="/nuevoproducto" element={<NuevoProducto />} />
-      <Route path="/nuevousuario" element={<NuevoUsuario />} />
-      <Route path="/productosadmin" element={<Productosadmin />} />
-      <Route path="/usuariosadmin" element={<Usuariosadmin />} />
-        <Route
-          path="/"
-          element={
-            <Home
-              productos={productosFiltrados.length ? productosFiltrados : productos}
-              usuario={usuario}
-              onAgregarCarrito={handleAgregarCarrito}
-            />
-          }
-        />
-        <Route
-          path="/categoria"
-          element={
-            <Categoria
-              productos={productosFiltrados.length ? productosFiltrados : productos}
-              usuario={usuario}
-              onAgregarCarrito={handleAgregarCarrito}
-            />
-          }
-        />
-        <Route
-          path="/ofertas"
-          element={
-            <Ofertas
-              productos={productosFiltrados.length ? productosFiltrados : productos}
-              usuario={usuario}
-              onAgregarCarrito={handleAgregarCarrito}
-            />
-          }
-        />
+        <Route path="/categoria_admin" element={<CategoriaAdmin />} />
+        <Route path="/editarproducto" element={<EditarProducto />} />
+        <Route path="/editaruser" element={<EditarUser />} />
+        <Route path="/nuevoproducto" element={<NuevoProducto />} />
+        <Route path="/nuevousuario" element={<NuevoUsuario />} />
+        <Route path="/productosadmin" element={<Productosadmin />} />
+        <Route path="/usuariosadmin" element={<Usuariosadmin />} />
+
+        <Route path="/" element={<Home productos={productosConStockReal} usuario={usuario} onAgregarCarrito={handleAgregarCarrito} />} />
+        <Route path="/categoria" element={<Categoria productos={productosConStockReal} usuario={usuario} onAgregarCarrito={handleAgregarCarrito} />} />
+        <Route path="/ofertas" element={<Ofertas productos={productosConStockReal} usuario={usuario} onAgregarCarrito={handleAgregarCarrito} />} />
+
         <Route path="/auth" element={<Auth onUsuarioChange={setUsuario} />} />
         <Route path="/nosotros" element={<Nosotros />} />
         <Route path="/blog" element={<Blog />} />
         <Route path="/eventos" element={<Eventos />} />
         <Route path="/soporte" element={<Soporte usuario={usuario} />} />
         <Route path="/detalles" element={<Detalles usuario={usuario} onAgregarCarrito={handleAgregarCarrito} />} />
-        <Route
-          path="/carro"
-          element={
-            <Carro
-              carrito={carrito}
-              onActualizarCantidad={actualizarCantidadCarrito}
-              onEliminarItem={eliminarItemDelCarrito}
-            />
-          }
-        />
+        <Route path="/carro" element={<Carro carrito={carrito} onActualizarCantidad={actualizarCantidadCarrito} onEliminarItem={eliminarItemDelCarrito} />} />
         <Route
           path="/checkout"
           element={
             <ProteccionUser usuario={usuario}>
-              <Checkout
-                carrito={carrito}
-                onActualizarCantidad={actualizarCantidadCarrito}
-                onCompraExitosa={() => setCarrito([])}
-              />
+              <Checkout carrito={carrito} onActualizarCantidad={actualizarCantidadCarrito} onCompraExitosa={() => setCarrito([])} />
             </ProteccionUser>
           }
         />

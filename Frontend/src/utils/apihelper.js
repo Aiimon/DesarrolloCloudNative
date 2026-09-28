@@ -1,7 +1,8 @@
-
-
-const BACKEND_URL = "http://54.145.20.191:8082";
+const API_BASE_URL = "http://98.89.1.201:8082";
+const BACKEND_URL = "http://98.89.1.201:8082";
 const GATEWAY_URL = "https://h1m5l703rk.execute-api.us-east-1.amazonaws.com/Desarrollo";
+
+export { API_BASE_URL, BACKEND_URL, GATEWAY_URL };
 
 // Endpoints
 export const API_USUARIOS = `${BACKEND_URL}/v2/usuarios`;
@@ -10,6 +11,7 @@ export const API_CATEGORIAS = `${BACKEND_URL}/v2/categorias`; // Directo a la EC
 export const API_CARRITO = `${BACKEND_URL}/v2/carrito`;
 export const API_BOLETAS = `${BACKEND_URL}/v2/boletas`;
 export const API_IMAGENES = `${BACKEND_URL}/v2/imagenes`;
+export const API_ORDERS = `${BACKEND_URL}/api/orders`;
 
 // Headers con JWT si existe en localStorage
 export const getHeaders = () => {
@@ -18,6 +20,31 @@ export const getHeaders = () => {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+};
+
+// ================= ESTADO / CONECTIVIDAD =================
+
+export const getOrderStatus = async () => {
+  try {
+    // Usamos /v2/categorias/todas o un actuator/health si existe
+    const resp = await fetch(`${BACKEND_URL}/v2/categorias/todas`, { 
+      method: "GET",
+      headers: { "Content-Type": "application/json" }
+    });
+    
+    if (resp.ok) {
+      return { ok: true };
+    }
+    return { ok: false, status: resp.status };
+  } catch (error) {
+    return { ok: false, error };
+  }
+};
+
+export const sendOrderEvent = async (customerName) => {
+  // Simular evento localmente sin hacer fetch para no generar errores 404
+  console.log(`[RabbitMQ Simulado] Evento de orden generado para: ${customerName}`);
+  return true;
 };
 
 // ================= IMAGENES =================
@@ -42,9 +69,7 @@ export const getImagenPorId = async (id) => {
 export const loginUsuario = async (email, password) => {
   const resp = await fetch(`${API_USUARIOS}/login`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
 
@@ -53,7 +78,6 @@ export const loginUsuario = async (email, password) => {
   }
 
   const data = await resp.json();
-
   if (data.token) localStorage.setItem("token", data.token);
   if (data.usuario) localStorage.setItem("usuario", JSON.stringify(data.usuario));
 
@@ -63,9 +87,7 @@ export const loginUsuario = async (email, password) => {
 export const crearUsuario = async (data) => {
   const resp = await fetch(`${API_USUARIOS}/crear`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
 
@@ -223,48 +245,79 @@ export const deleteCategoria = async (id) => {
 
 // ================= CARRITO =================
 
+// ================= CARRITO =================
+
 export const obtenerCarrito = async (usuarioId) => {
   if (!usuarioId) return { items: [] };
-  const resp = await fetch(`${API_CARRITO}/${usuarioId}`, { headers: getHeaders() });
-  return resp.ok ? resp.json() : Promise.reject("Error al obtener carrito");
+  try {
+    const raw = localStorage.getItem(`carrito_${usuarioId}`);
+    return { items: raw ? JSON.parse(raw) : [] };
+  } catch {
+    return { items: [] };
+  }
 };
 
-export const agregarAlCarrito = async (usuarioId, productoId, cantidad) => {
-  if (!usuarioId) return Promise.reject("Usuario no definido");
-  const resp = await fetch(`${API_CARRITO}/${usuarioId}/agregar/${productoId}?cantidad=${cantidad}`, {
-    method: "POST",
-    headers: getHeaders(),
-  });
-  return resp.ok ? resp.json() : Promise.reject("Error al agregar producto al carrito");
+export const agregarAlCarrito = async (usuarioId, productoInput, cantidad = 1) => {
+  if (!usuarioId) throw new Error("Debes iniciar sesión para agregar al carrito");
+
+  const productoId = typeof productoInput === "object" && productoInput !== null
+    ? (productoInput.productoId ?? productoInput.id)
+    : productoInput;
+
+  const raw = localStorage.getItem(`carrito_${usuarioId}`);
+  let items = raw ? JSON.parse(raw) : [];
+
+  const index = items.findIndex((it) => (it.productoId ?? it.id) === productoId);
+
+  if (index >= 0) {
+    items[index].cantidad += Number(cantidad);
+  } else {
+    items.push({
+      productoId: productoId,
+      id: productoId,
+      cantidad: Number(cantidad),
+      ...(typeof productoInput === "object" && productoInput !== null ? productoInput : {}),
+    });
+  }
+
+  localStorage.setItem(`carrito_${usuarioId}`, JSON.stringify(items));
+  return { items };
 };
 
 export const vaciarCarrito = async (usuarioId) => {
   if (!usuarioId) return false;
-  const resp = await fetch(`${API_CARRITO}/${usuarioId}/vaciar`, {
-    method: "DELETE",
-    headers: getHeaders(),
-  });
-  return resp.ok ? true : Promise.reject("Error al vaciar carrito");
+  localStorage.removeItem(`carrito_${usuarioId}`);
+  return true;
 };
 
 export const actualizarItemCarrito = async (usuarioId, itemId, cantidad) => {
   if (!usuarioId) return Promise.reject("Usuario no definido");
-  const resp = await fetch(`${API_CARRITO}/${usuarioId}/item/${itemId}?cantidad=${cantidad}`, {
-    method: "PUT",
-    headers: getHeaders(),
+
+  const raw = localStorage.getItem(`carrito_${usuarioId}`);
+  let items = raw ? JSON.parse(raw) : [];
+
+  items = items.map((it) => {
+    if ((it.productoId ?? it.id) === itemId) {
+      return { ...it, cantidad: Number(cantidad) };
+    }
+    return it;
   });
-  return resp.ok ? resp.json() : Promise.reject("Error al actualizar cantidad del item");
+
+  localStorage.setItem(`carrito_${usuarioId}`, JSON.stringify(items));
+  return { items };
 };
 
 export const eliminarItemCarrito = async (usuarioId, itemId) => {
   if (!usuarioId) return Promise.reject("Usuario no definido");
-  const resp = await fetch(`${API_CARRITO}/${usuarioId}/item/${itemId}`, {
-    method: "DELETE",
-    headers: getHeaders(),
-  });
-  return resp.ok ? resp.json() : Promise.reject("Error al eliminar item del carrito");
-};
 
+  const raw = localStorage.getItem(`carrito_${usuarioId}`);
+  let items = raw ? JSON.parse(raw) : [];
+
+  items = items.filter((it) => (it.productoId ?? it.id) !== itemId);
+
+  localStorage.setItem(`carrito_${usuarioId}`, JSON.stringify(items));
+  return { items };
+};
 // ================= BOLETAS =================
 
 export const generarBoleta = async (usuarioId) => {

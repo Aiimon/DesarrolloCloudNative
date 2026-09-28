@@ -10,7 +10,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/v2/imagenes")
-@CrossOrigin(origins = "*") // Permite que React acceda
+@CrossOrigin(origins = "*") 
 public class ImagenController {
 
     @PersistenceContext
