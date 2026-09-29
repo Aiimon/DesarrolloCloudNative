@@ -10,7 +10,7 @@ Prueba2026..
 
 
 Conexión a la máquina EC2
-ssh -i "labsuser.pem" ubuntu@98.89.1.201
+ssh -i "labsuser.pem" ubuntu@ipAWS
 
 Inicia la aplicación en segundo plano con el Wallet de Oracle
 nohup java -jar app.jar --spring.datasource.url="jdbc:oracle:thin:@tiendalevelup_low?TNS_ADMIN=/home/ubuntu/Wallet_tiendalevelup" > app.log 2>&1 &
