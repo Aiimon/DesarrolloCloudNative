@@ -6,8 +6,8 @@ export { API_BASE_URL, BACKEND_URL, GATEWAY_URL };
 
 // Endpoints
 export const API_USUARIOS = `${BACKEND_URL}/v2/usuarios`;
-export const API_PRODUCTOS = `${GATEWAY_URL}/v2/productos`; // Ruta por Gateway con JWT
-export const API_CATEGORIAS = `${BACKEND_URL}/v2/categorias`; // Directo a la EC2
+export const API_PRODUCTOS = `${GATEWAY_URL}/v2/productos`;
+export const API_CATEGORIAS = `${BACKEND_URL}/v2/categorias`;
 export const API_CARRITO = `${BACKEND_URL}/v2/carrito`;
 export const API_BOLETAS = `${BACKEND_URL}/v2/boletas`;
 export const API_IMAGENES = `${BACKEND_URL}/v2/imagenes`;
@@ -25,11 +25,11 @@ export const getBffHomeData = async () => {
   if (!response.ok) {
     throw new Error(`Error en BFF: ${response.status}`);
   }
+
   
   return await response.json();
 };
 
-// Headers con JWT si existe en localStorage
 export const getHeaders = () => {
   const token = localStorage.getItem("token");
   return {
@@ -258,8 +258,6 @@ export const deleteCategoria = async (id) => {
   });
   return resp.ok ? true : Promise.reject("Error al eliminar categoría");
 };
-
-// ================= CARRITO =================
 
 // ================= CARRITO =================
 
