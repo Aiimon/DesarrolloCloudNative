@@ -1,5 +1,5 @@
-const API_BASE_URL = "http://98.89.1.201:8082";
-const BACKEND_URL = "http://98.89.1.201:8082";
+const API_BASE_URL = "http://3.210.29.100:8082";
+const BACKEND_URL = "http://3.210.29.100:8082";
 const GATEWAY_URL = "https://h1m5l703rk.execute-api.us-east-1.amazonaws.com/Desarrollo";
 
 export { API_BASE_URL, BACKEND_URL, GATEWAY_URL };
@@ -12,6 +12,22 @@ export const API_CARRITO = `${BACKEND_URL}/v2/carrito`;
 export const API_BOLETAS = `${BACKEND_URL}/v2/boletas`;
 export const API_IMAGENES = `${BACKEND_URL}/v2/imagenes`;
 export const API_ORDERS = `${BACKEND_URL}/api/orders`;
+
+export const getBffHomeData = async () => {
+  const token = localStorage.getItem("token");
+  const headers = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+
+  const response = await fetch(`${GATEWAY_URL}/bff/home-data`, { headers });
+  
+  if (!response.ok) {
+    throw new Error(`Error en BFF: ${response.status}`);
+  }
+  
+  return await response.json();
+};
 
 // Headers con JWT si existe en localStorage
 export const getHeaders = () => {
