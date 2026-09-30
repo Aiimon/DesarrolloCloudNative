@@ -13,6 +13,20 @@ export const API_BOLETAS = `${BACKEND_URL}/v2/boletas`;
 export const API_IMAGENES = `${BACKEND_URL}/v2/imagenes`;
 export const API_ORDERS = `${BACKEND_URL}/api/orders`;
 
+export const getBffHomeData = async () => {
+  const token = localStorage.getItem("token");
+  const headers = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+  const response = await fetch(`${GATEWAY_URL}/bff/home-data`, { headers });
+  
+  if (!response.ok) {
+    throw new Error(`Error en BFF: ${response.status}`);
+  }
+  return await response.json();
+};
+
 export const getHeaders = () => {
   const token = localStorage.getItem("token");
   return {
