@@ -8,21 +8,22 @@ Credenciales User tenant
 estudiante@Pedido36001.onmicrosoft.com
 Prueba2026..
 
-
 Conexión a la máquina EC2
-ssh -i "labsuser.pem" ubuntu@ipAWS
+ssh -i "labsuser.pem" ubuntu@98.89.1.201
 
-Inicia la aplicación en segundo plano con el Wallet de Oracle
-nohup java -jar app.jar --spring.datasource.url="jdbc:oracle:thin:@tiendalevelup_low?TNS_ADMIN=/home/ubuntu/Wallet_tiendalevelup" > app.log 2>&1 &
-
+Inicia la aplicación en segundo plano
+nohup java -Xms128m -Xmx320m -XX:MaxMetaspaceSize=160m -jar /home/ubuntu/app.jar   --spring.rabbitmq.username=admin   --spring.rabbitmq.password=admin123 > /home/ubuntu/app.log 2>&1 &
 
 Valida si el backend inicio correctamente (mediante logs)
-tail -n 25 app.log
-
+tail -f /home/ubuntu/app.log
 
 Prueba local dentro de la EC2
 curl http://localhost:8082/v2/productos/todos
 
-
 Detiene proceso previo de Java
-pkill -f 'java.*app.jar'
+sudo fuser -k 8082/tcp 2>/dev/null
+
+
+Paypal
+sb-wxuwa47149727@personal.example.com
+{b^9Mv<*
