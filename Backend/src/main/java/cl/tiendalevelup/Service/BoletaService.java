@@ -23,15 +23,18 @@ public class BoletaService {
     @Autowired
     private ProductoRepository productoRepository;
 
+    @Autowired(required = false)
+    private PedidoProducerService pedidoProducerService;
+
     /**
-     * Genera una boleta a partir del carrito LOCAL enviado desde el frontend
+     * Genera una boleta a partir del carrito y emite el evento asíncrono a RabbitMQ
      */
     @Transactional
     public Boleta generarBoleta(int usuarioId, List<Map<String, Object>> items) {
 
         // 1. Validar usuario
         Usuario usuario = usuarioRepository.findById(usuarioId)
-                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado con ID: " + usuarioId));
 
         if (items == null || items.isEmpty()) {
             throw new RuntimeException("El carrito está vacío");
@@ -45,17 +48,15 @@ public class BoletaService {
         double total = 0;
 
         for (Map<String, Object> item : items) {
-
-            String productoId = (String) item.get("productoId"); // 👈 STRING
+            String productoId = (String) item.get("productoId");
             int cantidad = (int) item.get("cantidad");
-            double precioUnitario =
-                    ((Number) item.get("precioUnitario")).doubleValue();
+            double precioUnitario = ((Number) item.get("precioUnitario")).doubleValue();
 
             Producto producto = productoRepository.findById(productoId)
-                    .orElseThrow(() -> new RuntimeException("Producto no encontrado"));
+                    .orElseThrow(() -> new RuntimeException("Producto no encontrado: " + productoId));
 
             if (producto.getStock() < cantidad) {
-                throw new RuntimeException("Stock insuficiente: " + producto.getNombre());
+                throw new RuntimeException("Stock insuficiente para: " + producto.getNombre());
             }
 
             producto.setStock(producto.getStock() - cantidad);
@@ -71,23 +72,30 @@ public class BoletaService {
             total += detalle.getSubtotal();
         }
 
-        // 7. Total final
         boleta.setTotal(total);
 
-        // 8. Guardar boleta + detalles (cascade ALL)
-        return boletaRepository.save(boleta);
+        // Guardar boleta y sus detalles en Oracle Autonomous Database
+        Boleta boletaGuardada = boletaRepository.save(boleta);
+
+        // Disparar evento hacia RabbitMQ (pedidos.queue)
+        if (pedidoProducerService != null) {
+            String descripcion = String.format("Boleta N° %d generada para %s %s por un total de $%.2f (%d items)",
+                    boletaGuardada.getId(),
+                    usuario.getNombre(),
+                    usuario.getApellido(),
+                    boletaGuardada.getTotal(),
+                    boletaGuardada.getDetalles().size());
+
+            pedidoProducerService.enviarPedido("BOL-" + boletaGuardada.getId(), descripcion);
+        }
+
+        return boletaGuardada;
     }
 
-    /**
-     * Obtener boleta por ID
-     */
     public Boleta getBoletaById(Long id) {
         return boletaRepository.findById(id).orElse(null);
     }
 
-    /**
-     * Historial de boletas por usuario
-     */
     public List<Boleta> getBoletasByUsuario(int usuarioId) {
         return boletaRepository.findByUsuario_UsuarioId(usuarioId);
     }

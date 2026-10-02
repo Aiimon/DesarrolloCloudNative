@@ -11,24 +11,8 @@ export const API_CATEGORIAS = `${BACKEND_URL}/v2/categorias`;
 export const API_CARRITO = `${BACKEND_URL}/v2/carrito`;
 export const API_BOLETAS = `${BACKEND_URL}/v2/boletas`;
 export const API_IMAGENES = `${BACKEND_URL}/v2/imagenes`;
-export const API_ORDERS = `${BACKEND_URL}/api/orders`;
-
-export const getBffHomeData = async () => {
-  const token = localStorage.getItem("token");
-  const headers = {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  };
-
-  const response = await fetch(`${GATEWAY_URL}/bff/home-data`, { headers });
-  
-  if (!response.ok) {
-    throw new Error(`Error en BFF: ${response.status}`);
-  }
-
-  
-  return await response.json();
-};
+export const API_PEDIDOS_AMQP = `${BACKEND_URL}/api/pedidos`;
+export const API_RABBITMQ_ADMIN = `${BACKEND_URL}/api/rabbitmq`;
 
 export const getHeaders = () => {
   const token = localStorage.getItem("token");
@@ -38,49 +22,97 @@ export const getHeaders = () => {
   };
 };
 
-// ================= ESTADO / CONECTIVIDAD =================
+// ================= BFF & ESTADO =================
+
+export const getBffHomeData = async () => {
+  const response = await fetch(`${GATEWAY_URL}/bff/home-data`, { headers: getHeaders() });
+  if (!response.ok) {
+    throw new Error(`Error en BFF: ${response.status}`);
+  }
+  return await response.json();
+};
+
+export const sendOrderEvent = async (customerName) => {
+  try {
+    return await enviarPedidoAMQP(
+      `ORDER-${Date.now()}`,
+      `Evento de orden generado para cliente: ${customerName}`
+    );
+  } catch (error) {
+    console.error("Error al enviar evento de orden:", error);
+    return false;
+  }
+};
 
 export const getOrderStatus = async () => {
   try {
-    // Usamos /v2/categorias/todas o un actuator/health si existe
-    const resp = await fetch(`${BACKEND_URL}/v2/categorias/todas`, { 
+    const resp = await fetch(`${BACKEND_URL}/v2/categorias/todas`, {
       method: "GET",
       headers: { "Content-Type": "application/json" }
     });
-    
-    if (resp.ok) {
-      return { ok: true };
-    }
-    return { ok: false, status: resp.status };
+    return resp.ok ? { ok: true } : { ok: false, status: resp.status };
   } catch (error) {
     return { ok: false, error };
   }
 };
 
-export const sendOrderEvent = async (customerName) => {
-  // Simular evento localmente sin hacer fetch para no generar errores 404
-  console.log(`[RabbitMQ Simulado] Evento de orden generado para: ${customerName}`);
-  return true;
+// ================= RABBITMQ (PRODUCTOR & ADMIN) =================
+
+export const enviarPedidoAMQP = async (idPedido, descripcion) => {
+  try {
+    const resp = await fetch(`${API_PEDIDOS_AMQP}/crear`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({
+        cliente: idPedido,
+        detalle: descripcion
+      })
+    });
+    return resp.ok ? await resp.json() : null;
+  } catch (error) {
+    console.warn("[AMQP] Error al emitir mensaje a RabbitMQ:", error);
+    return null;
+  }
 };
 
-// ================= IMAGENES =================
-
-export const getImagenes = async () => {
-  const resp = await fetch(`${API_IMAGENES}/todas`, { headers: getHeaders() });
-  return resp.ok ? resp.json() : Promise.reject("Error al obtener imágenes");
+export const crearColaDinamica = async (queueName) => {
+  const resp = await fetch(`${API_RABBITMQ_ADMIN}/queues`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ queueName, durable: true })
+  });
+  return await resp.json();
 };
 
-export const getImagenesPorTipo = async (tipo) => {
-  const resp = await fetch(`${API_IMAGENES}/tipo/${tipo}`, { headers: getHeaders() });
-  return resp.ok ? resp.json() : Promise.reject(`Error al obtener imágenes tipo ${tipo}`);
+export const obtenerInfoCola = async (queueName) => {
+  const resp = await fetch(`${API_RABBITMQ_ADMIN}/queues/${queueName}`);
+  return await resp.json();
 };
 
-export const getImagenPorId = async (id) => {
-  const resp = await fetch(`${API_IMAGENES}/${id}`, { headers: getHeaders() });
-  return resp.ok ? resp.json() : Promise.reject("Imagen no encontrada");
-};
+// ================= USUARIOS & SINCRONIZACIÓN AZURE =================
 
-// ================= USUARIOS =================
+export const sincronizarUsuarioAzure = async (account) => {
+  try {
+    const resp = await fetch(`${API_USUARIOS}/sync-azure`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: account.username,
+        name: account.name || "Usuario Azure"
+      }),
+    });
+
+    if (!resp.ok) throw new Error("Fallo en sincronización con Oracle DB");
+
+    const data = await resp.json();
+    localStorage.setItem("usuario", JSON.stringify(data));
+    localStorage.setItem("usuarioId", data.usuarioId);
+    return data;
+  } catch (error) {
+    console.error("Error sincronizando usuario Azure:", error);
+    throw error;
+  }
+};
 
 export const loginUsuario = async (email, password) => {
   const resp = await fetch(`${API_USUARIOS}/login`, {
@@ -89,14 +121,14 @@ export const loginUsuario = async (email, password) => {
     body: JSON.stringify({ email, password }),
   });
 
-  if (!resp.ok) {
-    throw new Error("Credenciales incorrectas");
-  }
+  if (!resp.ok) throw new Error("Credenciales incorrectas");
 
   const data = await resp.json();
   if (data.token) localStorage.setItem("token", data.token);
-  if (data.usuario) localStorage.setItem("usuario", JSON.stringify(data.usuario));
-
+  if (data.usuario) {
+    localStorage.setItem("usuario", JSON.stringify(data.usuario));
+    localStorage.setItem("usuarioId", data.usuario.usuarioId);
+  }
   return data.usuario;
 };
 
@@ -106,21 +138,8 @@ export const crearUsuario = async (data) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-
-  if (!resp.ok) {
-    throw new Error("Error al crear usuario");
-  }
-
+  if (!resp.ok) throw new Error("Error al crear usuario");
   return await resp.json();
-};
-
-export const crearUsuarios = async (usuarios) => {
-  const resp = await fetch(`${API_USUARIOS}/crear/lista`, {
-    method: "POST",
-    headers: getHeaders(),
-    body: JSON.stringify(usuarios),
-  });
-  return resp.ok ? resp.json() : Promise.reject("Error al crear usuarios");
 };
 
 export const getUsuarios = async () => {
@@ -130,21 +149,6 @@ export const getUsuarios = async () => {
 
 export const getUsuarioPorId = async (usuarioId) => {
   const resp = await fetch(`${API_USUARIOS}/buscar/id/${usuarioId}`, { headers: getHeaders() });
-  return resp.ok ? resp.json() : Promise.reject("Usuario no encontrado");
-};
-
-export const getUsuarioPorEmail = async (email) => {
-  const resp = await fetch(`${API_USUARIOS}/buscar/email/${email}`, { headers: getHeaders() });
-  return resp.ok ? resp.json() : Promise.reject("Usuario no encontrado");
-};
-
-export const getUsuarioPorRut = async (rut) => {
-  const resp = await fetch(`${API_USUARIOS}/buscar/rut/${rut}`, { headers: getHeaders() });
-  return resp.ok ? resp.json() : Promise.reject("Usuario no encontrado");
-};
-
-export const getUsuarioPorNombre = async (nombre) => {
-  const resp = await fetch(`${API_USUARIOS}/buscar/nombre/${nombre}`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Usuario no encontrado");
 };
 
@@ -165,24 +169,7 @@ export const deleteUsuario = async (usuarioId) => {
   return resp.ok ? true : Promise.reject("Error al eliminar usuario");
 };
 
-export const deleteUsuarioPorRut = async (rut) => {
-  const resp = await fetch(`${API_USUARIOS}/eliminar/rut/${rut}`, {
-    method: "DELETE",
-    headers: getHeaders(),
-  });
-  return resp.ok ? true : Promise.reject("Error al eliminar usuario");
-};
-
 // ================= PRODUCTOS =================
-
-export const crearProducto = async (data) => {
-  const resp = await fetch(`${API_PRODUCTOS}/crear`, {
-    method: "POST",
-    headers: getHeaders(),
-    body: JSON.stringify(data),
-  });
-  return resp.ok ? resp.json() : Promise.reject("Error al crear producto");
-};
 
 export const getProductos = async () => {
   const resp = await fetch(`${API_PRODUCTOS}/todos`, { headers: getHeaders() });
@@ -194,9 +181,13 @@ export const getProductoPorId = async (id) => {
   return resp.ok ? resp.json() : Promise.reject("Producto no encontrado");
 };
 
-export const getProductoPorNombre = async (nombre) => {
-  const resp = await fetch(`${API_PRODUCTOS}/buscar/nombre/${nombre}`, { headers: getHeaders() });
-  return resp.ok ? resp.json() : Promise.reject("Producto no encontrado");
+export const crearProducto = async (data) => {
+  const resp = await fetch(`${API_PRODUCTOS}/crear`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(data),
+  });
+  return resp.ok ? resp.json() : Promise.reject("Error al crear producto");
 };
 
 export const updateProducto = async (id, data) => {
@@ -218,15 +209,6 @@ export const deleteProducto = async (id) => {
 
 // ================= CATEGORÍAS =================
 
-export const crearCategoria = async (data) => {
-  const resp = await fetch(`${API_CATEGORIAS}/crear`, {
-    method: "POST",
-    headers: getHeaders(),
-    body: JSON.stringify(data),
-  });
-  return resp.ok ? resp.json() : Promise.reject("Error al crear categoría");
-};
-
 export const getCategorias = async () => {
   const resp = await fetch(`${API_CATEGORIAS}/todas`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Error al obtener categorías");
@@ -240,6 +222,15 @@ export const getCategoriaPorId = async (id) => {
 export const getCategoriaPorNombre = async (nombre) => {
   const resp = await fetch(`${API_CATEGORIAS}/buscar/nombre/${nombre}`, { headers: getHeaders() });
   return resp.ok ? resp.json() : Promise.reject("Categoría no encontrada");
+};
+
+export const crearCategoria = async (data) => {
+  const resp = await fetch(`${API_CATEGORIAS}/crear`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(data),
+  });
+  return resp.ok ? resp.json() : Promise.reject("Error al crear categoría");
 };
 
 export const updateCategoria = async (id, data) => {
@@ -257,6 +248,23 @@ export const deleteCategoria = async (id) => {
     headers: getHeaders(),
   });
   return resp.ok ? true : Promise.reject("Error al eliminar categoría");
+};
+
+// ================= IMÁGENES =================
+
+export const getImagenes = async () => {
+  const resp = await fetch(`${API_IMAGENES}/todas`, { headers: getHeaders() });
+  return resp.ok ? resp.json() : Promise.reject("Error al obtener imágenes");
+};
+
+export const getImagenesPorTipo = async (tipo) => {
+  const resp = await fetch(`${API_IMAGENES}/tipo/${tipo}`, { headers: getHeaders() });
+  return resp.ok ? resp.json() : Promise.reject(`Error al obtener imágenes tipo ${tipo}`);
+};
+
+export const getImagenPorId = async (id) => {
+  const resp = await fetch(`${API_IMAGENES}/${id}`, { headers: getHeaders() });
+  return resp.ok ? resp.json() : Promise.reject("Imagen no encontrada");
 };
 
 // ================= CARRITO =================
@@ -295,13 +303,15 @@ export const agregarAlCarrito = async (usuarioId, productoInput, cantidad = 1) =
   }
 
   localStorage.setItem(`carrito_${usuarioId}`, JSON.stringify(items));
-  return { items };
-};
 
-export const vaciarCarrito = async (usuarioId) => {
-  if (!usuarioId) return false;
-  localStorage.removeItem(`carrito_${usuarioId}`);
-  return true;
+  // Publicar evento informativo en RabbitMQ
+  const nombreProd = productoInput?.nombre || productoId;
+  enviarPedidoAMQP(
+    `CART-${usuarioId}-${Date.now()}`,
+    `Usuario ID ${usuarioId} agregó al carrito: ${nombreProd} (Cant: ${cantidad})`
+  );
+
+  return { items };
 };
 
 export const actualizarItemCarrito = async (usuarioId, itemId, cantidad) => {
@@ -332,15 +342,61 @@ export const eliminarItemCarrito = async (usuarioId, itemId) => {
   localStorage.setItem(`carrito_${usuarioId}`, JSON.stringify(items));
   return { items };
 };
+
+export const vaciarCarrito = async (usuarioId) => {
+  if (!usuarioId) return false;
+  localStorage.removeItem(`carrito_${usuarioId}`);
+  return true;
+};
+
 // ================= BOLETAS =================
 
-export const generarBoleta = async (usuarioId) => {
+export const generarBoleta = async (usuarioId, simularFallo = false) => {
   if (!usuarioId) return Promise.reject("Usuario no definido");
-  const resp = await fetch(`${API_BOLETAS}/generar/${usuarioId}`, {
+
+  const raw = localStorage.getItem(`carrito_${usuarioId}`);
+  const itemsStorage = raw ? JSON.parse(raw) : [];
+
+  if (itemsStorage.length === 0) {
+    throw new Error("El carrito está vacío");
+  }
+
+  // Estructura requerida por BoletaController
+  const payload = {
+    usuarioId: Number(usuarioId),
+    items: itemsStorage.map((it) => ({
+      productoId: String(it.productoId ?? it.id),
+      cantidad: Number(it.cantidad),
+      precioUnitario: Number(it.precio ?? it.precioUnitario ?? 0),
+    })),
+  };
+
+  // 1. Guardar en Oracle Autonomous DB
+  const resp = await fetch(`${API_BOLETAS}/generar`, {
     method: "POST",
     headers: getHeaders(),
+    body: JSON.stringify(payload),
   });
-  return resp.ok ? resp.json() : Promise.reject("Error al generar boleta");
+
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    throw new Error(errorText || "Error al generar la boleta en Oracle");
+  }
+
+  const boletaGenerada = await resp.json();
+
+  // 2. Notificar a RabbitMQ (pedidos.queue)
+  // "ERROR:" dispara NACK manual para demostrar la Dead Letter Queue (DLQ)
+  const detalleAMQP = simularFallo
+    ? `ERROR: Falla simulada en despacho para boleta ${boletaGenerada.id}`
+    : `Boleta ${boletaGenerada.id} pagada exitosamente por un total de $${boletaGenerada.total}`;
+
+  await enviarPedidoAMQP(`BOL-${boletaGenerada.id}`, detalleAMQP);
+
+  // 3. Limpiar carrito local
+  localStorage.removeItem(`carrito_${usuarioId}`);
+
+  return boletaGenerada;
 };
 
 export const getBoletaPorId = async (id) => {

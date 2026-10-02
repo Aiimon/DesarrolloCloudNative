@@ -161,4 +161,50 @@ public ResponseEntity<?> crearUsuario(@RequestBody Usuario u) {
     public Usuario actualizarUsuario(@RequestBody Usuario u) {
         return service.updateUsuario(u);
     }
+
+    @Operation(
+        summary = "Sincronizar usuario de Azure Entra ID",
+        description = "Recibe el email y nombre del usuario autenticado vía Azure Entra ID. "
+                    + "Si ya existe en Oracle Cloud, lo retorna; si no, lo registra con valores por defecto."
+    )
+    @PostMapping("/sync-azure")
+    public ResponseEntity<Usuario> syncAzure(@RequestBody Map<String, String> body) {
+        String email = body.get("email") != null ? body.get("email").trim().toLowerCase() : "";
+        String name = body.getOrDefault("name", "Usuario Tenant");
+
+        if (email.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        // 1. Verificar si ya existe en la base de datos Oracle
+        Usuario existente = service.getUsuarioByEmail(email);
+        if (existente != null) {
+            return ResponseEntity.ok(existente);
+        }
+
+        // 2. Si no existe, separar nombre y apellido
+        String[] partes = name.trim().split(" ", 2);
+        String nombre = partes[0];
+        String apellido = partes.length > 1 ? partes[1] : "Azure";
+
+        // 3. Crear usuario cumpliendo con todas las columnas obligatorias de tu tabla
+        Usuario nuevo = new Usuario();
+        nuevo.setEmail(email);
+        nuevo.setNombre(nombre);
+        nuevo.setApellido(apellido);
+        // Generar un identificador temporal único para la columna RUT (nullable = false, unique = true)
+        nuevo.setRut("ID-" + (int)(Math.random() * 9000000 + 1000000));
+        nuevo.setPassword("AZURE_ENTRA_ID"); // Contraseña dummy (la autenticación real la valida Azure)
+        nuevo.setFechaNacimiento("2000-01-01");
+        nuevo.setRegion("Metropolitana");
+        nuevo.setComuna("Santiago");
+        nuevo.setTelefono("+56900000000");
+        nuevo.setEsDuoc(email.endsWith("@duoc.cl") || email.endsWith("@duocuc.cl"));
+        nuevo.setRol("USER");
+
+        Usuario guardado = service.saveUsuario(nuevo);
+        System.out.println("[ORACLE DB] Usuario Azure sincronizado con ID: " + guardado.getUsuarioId());
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(guardado);
+    }
 }

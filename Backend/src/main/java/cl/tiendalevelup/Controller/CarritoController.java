@@ -2,6 +2,7 @@ package cl.tiendalevelup.Controller;
 
 import cl.tiendalevelup.Entity.Producto;
 import cl.tiendalevelup.Service.ProductoService;
+import cl.tiendalevelup.Service.PedidoProducerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,8 +18,10 @@ public class CarritoController {
     @Autowired
     private ProductoService productoService;
 
-    // Estructura en memoria por usuario (simula persistencia si no creaste tablas de BD para carrito)
-    // Map<usuarioId, Map<productoId, Item>>
+    @Autowired(required = false)
+    private PedidoProducerService pedidoProducerService;
+
+    // Estructura en memoria por usuario
     private final Map<Long, Map<String, Map<String, Object>>> carritos = new ConcurrentHashMap<>();
 
     @GetMapping("/{usuarioId}")
@@ -32,7 +35,7 @@ public class CarritoController {
     @PostMapping("/{usuarioId}/agregar/{productoId}")
     public ResponseEntity<?> agregarAlCarrito(
             @PathVariable Long usuarioId,
-            @PathVariable String productoId, // String para aceptar KB001
+            @PathVariable String productoId,
             @RequestParam(defaultValue = "1") int cantidad) {
 
         Producto prod = productoService.obtenerPorId(productoId).orElse(null);
@@ -60,6 +63,13 @@ public class CarritoController {
             userCart.put(productoId, item);
         }
 
+        // EVENTO A RABBITMQ: Notificar adición al carrito
+        if (pedidoProducerService != null) {
+            String evento = String.format("Usuario ID %d agregó %d unidad(es) de [%s] (ID: %s)",
+                    usuarioId, cantidad, prod.getNombre(), productoId);
+            pedidoProducerService.enviarPedido("CART-ADD-" + usuarioId + "-" + System.currentTimeMillis(), evento);
+        }
+
         Map<String, Object> resp = new HashMap<>();
         resp.put("items", new ArrayList<>(userCart.values()));
         return ResponseEntity.ok(resp);
@@ -78,6 +88,13 @@ public class CarritoController {
             } else {
                 userCart.get(productoId).put("cantidad", cantidad);
             }
+
+            // EVENTO A RABBITMQ: Notificar actualización
+            if (pedidoProducerService != null) {
+                String evento = String.format("Usuario ID %d modificó cantidad de producto [%s] a %d",
+                        usuarioId, productoId, Math.max(0, cantidad));
+                pedidoProducerService.enviarPedido("CART-UPD-" + usuarioId + "-" + System.currentTimeMillis(), evento);
+            }
         }
 
         Map<String, Object> resp = new HashMap<>();
@@ -93,6 +110,12 @@ public class CarritoController {
         Map<String, Map<String, Object>> userCart = carritos.get(usuarioId);
         if (userCart != null) {
             userCart.remove(productoId);
+
+            // EVENTO A RABBITMQ: Notificar eliminación de item
+            if (pedidoProducerService != null) {
+                String evento = String.format("Usuario ID %d eliminó producto [%s] del carrito", usuarioId, productoId);
+                pedidoProducerService.enviarPedido("CART-DEL-" + usuarioId + "-" + System.currentTimeMillis(), evento);
+            }
         }
 
         Map<String, Object> resp = new HashMap<>();
@@ -103,6 +126,13 @@ public class CarritoController {
     @DeleteMapping("/{usuarioId}/vaciar")
     public ResponseEntity<?> vaciar(@PathVariable Long usuarioId) {
         carritos.remove(usuarioId);
+
+        // EVENTO A RABBITMQ: Notificar vaciado
+        if (pedidoProducerService != null) {
+            String evento = String.format("Usuario ID %d vació todo su carrito", usuarioId);
+            pedidoProducerService.enviarPedido("CART-CLR-" + usuarioId + "-" + System.currentTimeMillis(), evento);
+        }
+
         return ResponseEntity.ok(true);
     }
 }
