@@ -3,6 +3,7 @@ import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import Footer from "../components/Footer";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
+import { generarBoleta, enviarPedidoAMQP } from "../utils/apihelper";
 
 function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
   const navigate = useNavigate();
@@ -19,6 +20,43 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
       : p.precio;
     return acc + p.cantidad * precioFinal;
   }, 0);
+
+  // Obtiene el ID real de la base de datos Oracle (ID 21 como predeterminado)
+  const usuarioActivo =
+    JSON.parse(localStorage.getItem("usuario")) ||
+    JSON.parse(localStorage.getItem("usuarioActual")) ||
+    {};
+  const usuarioId =
+    usuarioActivo.usuarioId ||
+    usuarioActivo.id ||
+    localStorage.getItem("usuarioId") ||
+    21;
+
+  // Botón para demostrar en vivo el desvío a la Dead Letter Queue (NACK)
+  const handleSimularFallaDLQ = async () => {
+    try {
+      Swal.fire({
+        title: "Simulando Fallo...",
+        text: "Enviando evento de pago fallido a RabbitMQ para activar la DLQ",
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading(),
+      });
+
+      await enviarPedidoAMQP(
+        `PAY-FAIL-${Date.now()}`,
+        `ERROR: Transacción bancaria rechazada para usuario ID ${usuarioId}. Simulación forzada para DLQ.`
+      );
+
+      Swal.fire({
+        title: "¡Enviado a la DLQ!",
+        text: "El backend aplicó basicNack. Revisa pedidos.dlq en la web de RabbitMQ.",
+        icon: "warning",
+        confirmButtonColor: "#f39c12",
+      });
+    } catch (error) {
+      Swal.fire("Error", error.message, "error");
+    }
+  };
 
   return (
     <>
@@ -126,11 +164,17 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                       label: "paypal",
                     }}
                     createOrder={(data, actions) => {
+                      // Evita el error 422: si el monto en CLP da menos de 1 USD, asegura 1.00 USD
+                      const calculoUSD = totalPrecio / 900;
+                      const valorFinalUSD =
+                        calculoUSD >= 1 ? calculoUSD.toFixed(2) : "1.00";
+
                       return actions.order.create({
                         purchase_units: [
                           {
                             amount: {
-                              value: totalPrecio.toString(),
+                              currency_code: "USD",
+                              value: valorFinalUSD,
                             },
                           },
                         ],
@@ -140,6 +184,10 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                       try {
                         const order = await actions.order.capture();
 
+                        // 1. Guardar la boleta en Oracle DB y emitir evento a RabbitMQ (ACK)
+                        const boletaBD = await generarBoleta(usuarioId, carrito, false);
+
+                        // 2. Preparar los datos para la pantalla final /boleta
                         const items = carrito.map((p) => {
                           const precioFinal = p.descuento
                             ? Math.round(p.precio * (1 - p.descuento / 100))
@@ -155,32 +203,20 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                           };
                         });
 
-                        const totalProductosFinal = items.reduce(
-                          (acc, it) => acc + it.cantidad,
-                          0
-                        );
-                        const totalPrecioFinal = items.reduce(
-                          (acc, it) => acc + it.subtotal,
-                          0
-                        );
-
                         const boleta = {
+                          id: boletaBD.id,
                           idTransaccionPayPal: order.id || data.orderID,
                           fecha: new Date().toISOString(),
                           items,
-                          totalProductos: totalProductosFinal,
-                          totalPrecio: totalPrecioFinal,
+                          totalProductos,
+                          totalPrecio,
                           payer: order.payer || null,
                         };
 
-                        // Usuario activo
-                        const usuarioActivo = JSON.parse(localStorage.getItem("usuario")) || JSON.parse(localStorage.getItem("usuarioActual"));
-
-                        // Guardar en "ultimaBoleta"
                         localStorage.setItem("ultimaBoleta", JSON.stringify(boleta));
 
-                        // Guardar en "boletas" con email del usuario de la página
-                        const todasBoletas = JSON.parse(localStorage.getItem("boletas")) || [];
+                        const todasBoletas =
+                          JSON.parse(localStorage.getItem("boletas")) || [];
                         todasBoletas.push({
                           ...boleta,
                           email: usuarioActivo.email,
@@ -191,7 +227,7 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
 
                         Swal.fire({
                           title: "¡Compra exitosa!",
-                          text: "Tu pago fue procesado correctamente.",
+                          text: `Boleta N° ${boletaBD.id} registrada en Oracle y notificada a RabbitMQ.`,
                           icon: "success",
                           confirmButtonText: "Ver boleta",
                           confirmButtonColor: "#3085d6",
@@ -199,40 +235,61 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                           navigate("/boleta");
                         });
                       } catch (err) {
-                        console.error("Error capturando orden:", err);
+                        console.error("Error al procesar boleta en backend:", err);
                         Swal.fire({
-                          title: "Error en el pago",
-                          text: "Hubo un problema al procesar tu compra. Intenta nuevamente.",
+                          title: "Error al registrar compra",
+                          text: err.message || "Fallo en el servicio de pagos.",
                           icon: "error",
                           confirmButtonText: "Aceptar",
                           confirmButtonColor: "#d33",
                         });
                       }
                     }}
-                    onCancel={() => {
+                    onCancel={async () => {
+                      // Registrar la cancelación de PayPal en RabbitMQ (Directo a DLQ)
+                      await enviarPedidoAMQP(
+                        `PAY-CANCEL-${Date.now()}`,
+                        `ERROR: Usuario ID ${usuarioId} canceló el flujo de pago en PayPal.`
+                      );
+
                       Swal.fire({
-                        title: "Pago rechazado",
-                        text: "Cancelaste el pago o cerraste la ventana de PayPal.",
+                        title: "Pago cancelado",
+                        text: "Cancelaste la operación. Se registró el evento en auditoría (DLQ).",
                         icon: "warning",
                         confirmButtonText: "Aceptar",
                         confirmButtonColor: "#f39c12",
                       });
                     }}
-                    onError={(err) => {
-                      console.error("Error en el pago:", err);
+                    onError={async (err) => {
+                      console.error("Error en PayPal:", err);
+
+                      // Registrar error técnico de la pasarela en RabbitMQ (Directo a DLQ)
+                      await enviarPedidoAMQP(
+                        `PAY-ERR-${Date.now()}`,
+                        `ERROR: Fallo en pasarela PayPal para usuario ID ${usuarioId}. Detalle: ${err?.message || "Timeout"}`
+                      );
+
                       Swal.fire({
                         title: "Pago rechazado",
-                        text: "El pago fue rechazado o hubo un error. Intenta nuevamente.",
-                        icon: "warning",
+                        text: "Hubo un error con la pasarela. Se envió el evento a la DLQ.",
+                        icon: "error",
                         confirmButtonText: "Reintentar",
-                        confirmButtonColor: "#f39c12",
+                        confirmButtonColor: "#d33",
                       });
                     }}
                   />
                 </PayPalScriptProvider>
 
+                {/* BOTÓN EXTRA: Demostración técnica de Dead Letter Queue para el profe */}
                 <button
-                  className="btn btn-secondary w-100 mt-3"
+                  className="btn btn-outline-danger w-100 mt-2"
+                  onClick={handleSimularFallaDLQ}
+                >
+                  ⚠️ Simular Error de Pago (Probar DLQ)
+                </button>
+
+                <button
+                  className="btn btn-secondary w-100 mt-2"
                   onClick={() => navigate(-1)}
                 >
                   Volver

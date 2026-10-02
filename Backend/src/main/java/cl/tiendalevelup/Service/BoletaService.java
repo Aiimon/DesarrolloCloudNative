@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -26,18 +27,15 @@ public class BoletaService {
     @Autowired(required = false)
     private PedidoProducerService pedidoProducerService;
 
-    /**
-     * Genera una boleta a partir del carrito y emite el evento asíncrono a RabbitMQ
-     */
     @Transactional
     public Boleta generarBoleta(int usuarioId, List<Map<String, Object>> items) {
 
-        // 1. Validar usuario
+        // 1. Validar usuario en Oracle Autonomous Database
         Usuario usuario = usuarioRepository.findById(usuarioId)
-                .orElseThrow(() -> new RuntimeException("Usuario no encontrado con ID: " + usuarioId));
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado en base de datos con ID: " + usuarioId));
 
         if (items == null || items.isEmpty()) {
-            throw new RuntimeException("El carrito está vacío");
+            throw new RuntimeException("El carrito recibido está vacío");
         }
 
         // 2. Crear boleta
@@ -45,21 +43,35 @@ public class BoletaService {
         boleta.setUsuario(usuario);
         boleta.setFechaEmision(new Date());
 
+        // Asegurar que la lista de detalles no sea nula
+        if (boleta.getDetalles() == null) {
+            boleta.setDetalles(new ArrayList<>());
+        }
+
         double total = 0;
 
         for (Map<String, Object> item : items) {
-            String productoId = (String) item.get("productoId");
-            int cantidad = (int) item.get("cantidad");
-            double precioUnitario = ((Number) item.get("precioUnitario")).doubleValue();
+            String productoId = String.valueOf(item.get("productoId"));
+            
+            // Conversión segura de tipos numéricos evitando ClassCastException
+            int cantidad = item.get("cantidad") instanceof Number 
+                    ? ((Number) item.get("cantidad")).intValue() 
+                    : Integer.parseInt(String.valueOf(item.get("cantidad")));
+
+            double precioUnitario = item.get("precioUnitario") instanceof Number
+                    ? ((Number) item.get("precioUnitario")).doubleValue()
+                    : Double.parseDouble(String.valueOf(item.get("precioUnitario")));
 
             Producto producto = productoRepository.findById(productoId)
-                    .orElseThrow(() -> new RuntimeException("Producto no encontrado: " + productoId));
+                    .orElseThrow(() -> new RuntimeException("Producto no encontrado en catálogo con ID: " + productoId));
 
             if (producto.getStock() < cantidad) {
                 throw new RuntimeException("Stock insuficiente para: " + producto.getNombre());
             }
 
+            // Descontar inventario
             producto.setStock(producto.getStock() - cantidad);
+            productoRepository.save(producto);
 
             DetalleBoleta detalle = new DetalleBoleta();
             detalle.setBoleta(boleta);
@@ -74,15 +86,15 @@ public class BoletaService {
 
         boleta.setTotal(total);
 
-        // Guardar boleta y sus detalles en Oracle Autonomous Database
+        // 3. Guardar boleta y sus detalles en Oracle Autonomous Database
         Boleta boletaGuardada = boletaRepository.save(boleta);
 
-        // Disparar evento hacia RabbitMQ (pedidos.queue)
+        // 4. Disparar evento hacia RabbitMQ (pedidos.queue)
         if (pedidoProducerService != null) {
             String descripcion = String.format("Boleta N° %d generada para %s %s por un total de $%.2f (%d items)",
                     boletaGuardada.getId(),
-                    usuario.getNombre(),
-                    usuario.getApellido(),
+                    usuario.getNombre() != null ? usuario.getNombre() : "Cliente",
+                    usuario.getApellido() != null ? usuario.getApellido() : "",
                     boletaGuardada.getTotal(),
                     boletaGuardada.getDetalles().size());
 

@@ -351,13 +351,19 @@ export const vaciarCarrito = async (usuarioId) => {
 
 // ================= BOLETAS =================
 
-export const generarBoleta = async (usuarioId, simularFallo = false) => {
+export const generarBoleta = async (usuarioId, itemsDirectos = null, simularFallo = false) => {
   if (!usuarioId) return Promise.reject("Usuario no definido");
 
-  const raw = localStorage.getItem(`carrito_${usuarioId}`);
-  const itemsStorage = raw ? JSON.parse(raw) : [];
+  // Si se le pasan los items desde el componente los usa; si no, busca en el storage
+  let itemsStorage = itemsDirectos;
+  if (!itemsStorage || itemsStorage.length === 0) {
+    const rawStorage =
+      localStorage.getItem(`carrito_${usuarioId}`) ||
+      localStorage.getItem("carrito");
+    itemsStorage = rawStorage ? JSON.parse(rawStorage) : [];
+  }
 
-  if (itemsStorage.length === 0) {
+  if (!itemsStorage || itemsStorage.length === 0) {
     throw new Error("El carrito está vacío");
   }
 
@@ -365,9 +371,9 @@ export const generarBoleta = async (usuarioId, simularFallo = false) => {
   const payload = {
     usuarioId: Number(usuarioId),
     items: itemsStorage.map((it) => ({
-      productoId: String(it.productoId ?? it.id),
-      cantidad: Number(it.cantidad),
-      precioUnitario: Number(it.precio ?? it.precioUnitario ?? 0),
+      productoId: String(it.productoId || it.id),
+      cantidad: Number(it.cantidad || 1),
+      precioUnitario: Number(it.precioUnitario || it.precio || 0),
     })),
   };
 
@@ -386,26 +392,15 @@ export const generarBoleta = async (usuarioId, simularFallo = false) => {
   const boletaGenerada = await resp.json();
 
   // 2. Notificar a RabbitMQ (pedidos.queue)
-  // "ERROR:" dispara NACK manual para demostrar la Dead Letter Queue (DLQ)
   const detalleAMQP = simularFallo
-    ? `ERROR: Falla simulada en despacho para boleta ${boletaGenerada.id}`
+    ? `ERROR: Falla forzada en despacho para boleta ${boletaGenerada.id}`
     : `Boleta ${boletaGenerada.id} pagada exitosamente por un total de $${boletaGenerada.total}`;
 
   await enviarPedidoAMQP(`BOL-${boletaGenerada.id}`, detalleAMQP);
 
-  // 3. Limpiar carrito local
+  // 3. Limpiar carrito
   localStorage.removeItem(`carrito_${usuarioId}`);
+  localStorage.removeItem("carrito");
 
   return boletaGenerada;
-};
-
-export const getBoletaPorId = async (id) => {
-  const resp = await fetch(`${API_BOLETAS}/${id}`, { headers: getHeaders() });
-  return resp.ok ? resp.json() : Promise.reject("Boleta no encontrada");
-};
-
-export const getBoletasPorUsuario = async (usuarioId) => {
-  if (!usuarioId) return [];
-  const resp = await fetch(`${API_BOLETAS}/usuario/${usuarioId}`, { headers: getHeaders() });
-  return resp.ok ? resp.json() : Promise.reject("Error al obtener historial de boletas");
 };

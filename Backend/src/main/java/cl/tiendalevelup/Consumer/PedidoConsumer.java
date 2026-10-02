@@ -8,39 +8,42 @@ import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 @Service
 public class PedidoConsumer {
 
     @RabbitListener(queues = "pedidos.queue", ackMode = "MANUAL")
     public void consumirPedido(
-            Object payload, 
             Message message, 
             Channel channel, 
             @Header(AmqpHeaders.DELIVERY_TAG) long deliveryTag) throws IOException {
 
+        // Decodificar los bytes reales del mensaje a String UTF-8
+        String cuerpoTexto = new String(message.getBody(), StandardCharsets.UTF_8);
+
         System.out.println("=================================================");
-        System.out.println("[CONSUMIDOR] Mensaje recibido de pedidos.queue: " + payload);
+        System.out.println("[CONSUMIDOR] Payload recibido: " + cuerpoTexto);
 
         try {
-            String texto = payload.toString();
-
-            // Si el mensaje incluye "ERROR", lo enviamos intencionalmente a la DLQ
-            if (texto.contains("ERROR")) {
-                System.err.println("[CONSUMIDOR] Error detectado. Enviando a DLQ con NACK...");
-                channel.basicNack(deliveryTag, false, false); // requeue = false -> va a pedidos.dlq
+            // Detección estricta de simulación de error
+            if (cuerpoTexto.contains("ERROR")) {
+                System.err.println("[CONSUMIDOR ERROR] Contiene 'ERROR'. Enviando NACK para desviar a DLQ...");
+                
+                // basicNack(deliveryTag, multiple=false, requeue=false) -> Transfiere a pedidos.dlq
+                channel.basicNack(deliveryTag, false, false);
+                System.err.println("[CONSUMIDOR] Mensaje derivado con éxito a pedidos.dlq (tag: " + deliveryTag + ")");
+                System.out.println("=================================================");
                 return;
             }
 
-            // PROCESAMIENTO EXITOSO
-            System.out.println("[CONSUMIDOR] Procesando orden/evento con éxito...");
-            
-            // Enviar confirmación explícita para liberar el canal
+            // PROCESAMIENTO NORMAL EXITOSO
+            System.out.println("[CONSUMIDOR] Procesando orden exitosa...");
             channel.basicAck(deliveryTag, false);
-            System.out.println("[CONSUMIDOR] ACK confirmado exitosamente para tag: " + deliveryTag);
+            System.out.println("[CONSUMIDOR] ACK manual confirmado para tag: " + deliveryTag);
 
         } catch (Exception e) {
-            System.err.println("[CONSUMIDOR EXCEPCIÓN] Fallo inesperado: " + e.getMessage());
+            System.err.println("[CONSUMIDOR EXCEPCIÓN] Error inesperado: " + e.getMessage());
             channel.basicNack(deliveryTag, false, false);
         }
         System.out.println("=================================================");
