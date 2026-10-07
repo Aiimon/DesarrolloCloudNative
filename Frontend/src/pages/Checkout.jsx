@@ -32,12 +32,14 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
     localStorage.getItem("usuarioId") ||
     21;
 
-  // Botón para demostrar en vivo el desvío a la Dead Letter Queue (NACK)
+  // ================= PANEL DE PRUEBAS DE RESILIENCIA (DLQ / NACK) =================
+
+  // 1. Simulación de Falla en Pagos (pedidos.queue -> DLQ)
   const handleSimularFallaDLQ = async () => {
     try {
       Swal.fire({
-        title: "Simulando Fallo...",
-        text: "Enviando evento de pago fallido a RabbitMQ para activar la DLQ",
+        title: "Simulando Fallo de Pago...",
+        text: "Enviando evento de pago rechazado a RabbitMQ para activar la DLQ",
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading(),
       });
@@ -49,7 +51,59 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
 
       Swal.fire({
         title: "¡Enviado a la DLQ!",
-        text: "El backend aplicó basicNack. Revisa pedidos.dlq en la web de RabbitMQ.",
+        text: "El backend aplicó basicNack en pedidos.queue. Revisa pedidos.dlq en la web de RabbitMQ.",
+        icon: "warning",
+        confirmButtonColor: "#f39c12",
+      });
+    } catch (error) {
+      Swal.fire("Error", error.message, "error");
+    }
+  };
+
+  // 2. Simulación de Quiebre de Stock (inventario.queue -> DLQ)
+  const handleSimularFallaInventario = async () => {
+    try {
+      Swal.fire({
+        title: "Simulando Quiebre de Stock...",
+        text: "Enviando evento con stock no disponible a RabbitMQ",
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading(),
+      });
+
+      await enviarPedidoAMQP(
+        `INV-FAIL-${Date.now()}`,
+        `ERROR_STOCK: Inconsistencia física de bodega para usuario ID ${usuarioId}. Stock insuficiente.`
+      );
+
+      Swal.fire({
+        title: "¡Rechazado a DLQ!",
+        text: "El consumidor de inventario aplicó basicNack. Mensaje resguardado en pedidos.dlq.",
+        icon: "warning",
+        confirmButtonColor: "#f39c12",
+      });
+    } catch (error) {
+      Swal.fire("Error", error.message, "error");
+    }
+  };
+
+  // 3. Simulación de Caída SMTP / Notificaciones (notificaciones.queue -> DLQ)
+  const handleSimularFallaNotificacion = async () => {
+    try {
+      Swal.fire({
+        title: "Simulando Caída de Correo...",
+        text: "Enviando evento de falla en servidor SMTP a RabbitMQ",
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading(),
+      });
+
+      await enviarPedidoAMQP(
+        `NOTIF-FAIL-${Date.now()}`,
+        `ERROR_NOTIFICACION: Timeout al conectar con servidor SMTP externo para usuario ID ${usuarioId}.`
+      );
+
+      Swal.fire({
+        title: "¡Rechazado a DLQ!",
+        text: "El consumidor de notificaciones aplicó basicNack. Evento enviado a pedidos.dlq.",
         icon: "warning",
         confirmButtonColor: "#f39c12",
       });
@@ -164,7 +218,6 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                       label: "paypal",
                     }}
                     createOrder={(data, actions) => {
-                      // Evita el error 422: si el monto en CLP da menos de 1 USD, asegura 1.00 USD
                       const calculoUSD = totalPrecio / 900;
                       const valorFinalUSD =
                         calculoUSD >= 1 ? calculoUSD.toFixed(2) : "1.00";
@@ -184,7 +237,7 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                       try {
                         const order = await actions.order.capture();
 
-                        // 1. Guardar la boleta en Oracle DB y emitir evento a RabbitMQ (ACK)
+                        // 1. Guardar la boleta en Oracle DB y emitir eventos concurrentes a RabbitMQ
                         const boletaBD = await generarBoleta(usuarioId, carrito, false);
 
                         // 2. Preparar los datos para la pantalla final /boleta
@@ -227,7 +280,7 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
 
                         Swal.fire({
                           title: "¡Compra exitosa!",
-                          text: `Boleta N° ${boletaBD.id} registrada en Oracle y notificada a RabbitMQ.`,
+                          text: `Boleta N° ${boletaBD.id} registrada en Oracle y procesada concurrentemente por RabbitMQ.`,
                           icon: "success",
                           confirmButtonText: "Ver boleta",
                           confirmButtonColor: "#3085d6",
@@ -246,7 +299,6 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                       }
                     }}
                     onCancel={async () => {
-                      // Registrar la cancelación de PayPal en RabbitMQ (Directo a DLQ)
                       await enviarPedidoAMQP(
                         `PAY-CANCEL-${Date.now()}`,
                         `ERROR: Usuario ID ${usuarioId} canceló el flujo de pago en PayPal.`
@@ -263,7 +315,6 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                     onError={async (err) => {
                       console.error("Error en PayPal:", err);
 
-                      // Registrar error técnico de la pasarela en RabbitMQ (Directo a DLQ)
                       await enviarPedidoAMQP(
                         `PAY-ERR-${Date.now()}`,
                         `ERROR: Fallo en pasarela PayPal para usuario ID ${usuarioId}. Detalle: ${err?.message || "Timeout"}`
@@ -280,13 +331,33 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                   />
                 </PayPalScriptProvider>
 
-                {/* BOTÓN EXTRA: Demostración técnica de Dead Letter Queue para el profe */}
-                <button
-                  className="btn btn-outline-danger w-100 mt-2"
-                  onClick={handleSimularFallaDLQ}
-                >
-                  ⚠️ Simular Error de Pago (Probar DLQ)
-                </button>
+                {/* PANEL DE PRUEBAS DE RESILIENCIA (EVIDENCIA EVALUACIÓN EP2) */}
+                <div className="border border-secondary rounded p-2 mt-3 bg-dark">
+                  <small className="text-muted d-block text-center mb-2 fw-bold">
+                    Demostración de Tolerancia a Fallos (DLQ)
+                  </small>
+                  
+                  <button
+                    className="btn btn-outline-danger btn-sm w-100 mb-1"
+                    onClick={handleSimularFallaDLQ}
+                  >
+                    ⚠️ 1. Falla de Pago (pedidos.queue)
+                  </button>
+
+                  <button
+                    className="btn btn-outline-warning btn-sm w-100 mb-1"
+                    onClick={handleSimularFallaInventario}
+                  >
+                    📦 2. Quiebre de Stock (inventario.queue)
+                  </button>
+
+                  <button
+                    className="btn btn-outline-info btn-sm w-100 mb-2"
+                    onClick={handleSimularFallaNotificacion}
+                  >
+                    ✉️ 3. Caída SMTP (notificaciones.queue)
+                  </button>
+                </div>
 
                 <button
                   className="btn btn-secondary w-100 mt-2"
