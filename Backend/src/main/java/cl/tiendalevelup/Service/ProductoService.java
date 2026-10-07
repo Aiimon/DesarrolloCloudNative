@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ProductoService {
@@ -17,27 +18,22 @@ public class ProductoService {
         return repository.findTop3Destacados();
     }
 
-    // Guardar producto
     public Producto guardarProducto(Producto p) {
         return repository.save(p);
     }
 
-    // Listar todos los productos
     public List<Producto> listarProductos() {
         return repository.findAll();
     }
 
-    // Obtener producto por ID
     public Optional<Producto> obtenerPorId(String id) {
         return repository.findById(id);
     }
 
-    // Buscar producto por nombre
     public Optional<Producto> buscarPorNombre(String nombre) {
         return repository.findByNombre(nombre);
     }
 
-    // Actualizar producto
     public Producto actualizarProducto(String id, Producto p) {
         return repository.findById(id).map(prod -> {
             prod.setNombre(p.getNombre());
@@ -55,12 +51,45 @@ public class ProductoService {
         }).orElse(null);
     }
 
-    // Eliminar producto
     public boolean eliminarProducto(String id) {
         if (repository.existsById(id)) {
             repository.deleteById(id);
             return true;
         }
+        return false;
+    }
+
+    // =========================================================================
+    // LÓGICA DE NEGOCIO PARA INVENTARIO Y STOCK
+    // =========================================================================
+    @Transactional
+    public boolean descontarStock(String id, int cantidad) {
+        Optional<Producto> opt = repository.findById(id);
+        if (opt.isEmpty()) {
+            System.err.println("[INVENTARIO ERROR] Producto inexistente: " + id);
+            return false;
+        }
+
+        Producto producto = opt.get();
+        if (producto.getStock() < cantidad) {
+            System.err.println("[INVENTARIO STOCK INSUFICIENTE] Producto: " + producto.getNombre() + 
+                               " | Stock actual: " + producto.getStock() + " | Requerido: " + cantidad);
+            return false;
+        }
+
+        int filas = repository.descontarStockAtomicamente(id, cantidad);
+        if (filas > 0) {
+            int nuevoStock = producto.getStock() - cantidad;
+            System.out.println("[INVENTARIO ACTUALIZADO] Producto: " + producto.getNombre() + 
+                               " | Nuevo stock: " + nuevoStock);
+
+            if (nuevoStock <= producto.getStockCritico()) {
+                System.out.println("⚠️ [ALERTA STOCK CRÍTICO] " + producto.getNombre() + 
+                                   " quedó con " + nuevoStock + " unidades (Umbral: " + producto.getStockCritico() + ")");
+            }
+            return true;
+        }
+
         return false;
     }
 }
