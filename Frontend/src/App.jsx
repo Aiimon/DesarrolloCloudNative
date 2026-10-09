@@ -7,9 +7,7 @@ import {
   agregarAlCarrito,
   obtenerCarrito,
   actualizarItemCarrito,
-  eliminarItemCarrito,
-  getOrderStatus,
-  sendOrderEvent,
+  eliminarItemCarrito
 } from "./utils/apihelper";
 
 import Navbar from "./components/Navbar";
@@ -66,11 +64,6 @@ function Layout() {
   // Estado de usuario tolerante a Tenant
   const [usuario, setUsuario] = useState(() => obtenerUsuarioLS());
 
-  // Estados de monitoreo de RabbitMQ
-  const [backendStatus, setBackendStatus] = useState("Conectando...");
-  const [stats, setStats] = useState({ total: 0, success: 0, failed: 0 });
-
-
   // Escuchar cambios de usuario en localStorage
   useEffect(() => {
     const handleUsuarioCambiado = () => {
@@ -80,53 +73,6 @@ function Layout() {
     return () => window.removeEventListener("usuarioCambiado", handleUsuarioCambiado);
   }, []);
 
-  // Verificación de estado del Backend y RabbitMQ con freno ante 404
-  // Verificación de estado del Backend y RabbitMQ
-  useEffect(() => {
-    let activo = true;
-
-    const checkBackendStatus = async () => {
-      const targetUserId = usuario?.usuarioId || usuario?.id || null;
-      const res = await getOrderStatus(targetUserId);
-
-      if (!activo) return;
-
-      if (res.ok) {
-        setBackendStatus("Conectado a Backend & RabbitMQ");
-      } else {
-        setBackendStatus("Backend Desconectado o Inactivo");
-      }
-    };
-
-    checkBackendStatus();
-    // Chequeo cada 30 segundos para evitar saturación
-    const timer = setInterval(checkBackendStatus, 30000);
-
-    return () => {
-      activo = false;
-      clearInterval(timer);
-    };
-  }, [usuario]);
-
-  // Enviar mensaje de orden a RabbitMQ
-  const sendOrderRabbitMQ = async (customerName) => {
-    const enviado = await sendOrderEvent(customerName);
-    if (enviado) {
-      setStats((prev) => ({ ...prev, total: prev.total + 1 }));
-
-      // Simular procesamiento del evento (Exitoso o DLQ)
-      setTimeout(() => {
-        const isSuccess = Math.random() > 0.4;
-        setStats((prev) =>
-          isSuccess
-            ? { ...prev, success: prev.success + 1 }
-            : { ...prev, failed: prev.failed + 1 }
-        );
-      }, 1500);
-    }
-  };
-
-  // Cargar productos y categorías
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -231,7 +177,7 @@ function Layout() {
 
         // NOTA: Se eliminó el setProductos((prev) => prev.map(...)) de aquí
 
-        sendOrderRabbitMQ(usuarioActivo.nombre || usuarioActivo.username || usuarioActivo.email || "Cliente");
+        (usuarioActivo.nombre || usuarioActivo.username || usuarioActivo.email || "Cliente");
       } catch (error) {
         console.error("Error agregando al carrito:", error);
         alert("No se pudo agregar el producto al carrito");
@@ -308,14 +254,6 @@ const eliminarItemDelCarrito = async (productoId) => {
             abrirCarrito={() => setCarritoOpen(true)}
             usuario={usuario}
           />
-
-          {/* Banner con el estado de RabbitMQ y Métricas */}
-          <div style={{ padding: "8px 16px", background: "#f1f5f9", textAlign: "center", borderBottom: "1px solid #cbd5e1", fontSize: "0.9rem" }}>
-            <span><strong>Estado Backend:</strong> {backendStatus}</span>
-            <span style={{ marginLeft: "15px" }}><strong>Órdenes Totales:</strong> {stats.total} | </span>
-            <span style={{ color: "#16a34a", fontWeight: "bold" }}>Procesadas: {stats.success} | </span>
-            <span style={{ color: "#dc2626", fontWeight: "bold" }}>DLQ: {stats.failed}</span>
-          </div>
 
           {mostrarBuscador && (
             <BuscadorAvanzado categorias={categorias} onFilter={handleFiltrarProductos} />

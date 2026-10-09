@@ -1,9 +1,15 @@
 import { useNavigate } from "react-router-dom";
 import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
+import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
-import { generarBoleta, enviarPedidoAMQP } from "../utils/apihelper";
+import {
+  generarBoleta,
+  enviarPedidoAMQP,
+  enviarInventarioAMQP,
+  enviarNotificacionAMQP,
+} from "../utils/apihelper";
 
 function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
   const navigate = useNavigate();
@@ -21,7 +27,7 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
     return acc + p.cantidad * precioFinal;
   }, 0);
 
-  // Obtiene el ID real de la base de datos Oracle (ID 21 como predeterminado)
+  // Obtiene el ID del usuario autenticado (ID 21 como valor de respaldo)
   const usuarioActivo =
     JSON.parse(localStorage.getItem("usuario")) ||
     JSON.parse(localStorage.getItem("usuarioActual")) ||
@@ -34,7 +40,7 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
 
   // ================= PANEL DE PRUEBAS DE RESILIENCIA (DLQ / NACK) =================
 
-  // 1. Simulación de Falla en Pagos (pedidos.queue -> DLQ)
+  // 1. Falla en Pagos (pedidos.queue -> pedidos.dlq)
   const handleSimularFallaDLQ = async () => {
     try {
       Swal.fire({
@@ -51,7 +57,7 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
 
       Swal.fire({
         title: "¡Enviado a la DLQ!",
-        text: "El backend aplicó basicNack en pedidos.queue. Revisa pedidos.dlq en la web de RabbitMQ.",
+        text: "El backend aplicó basicNack en pedidos.queue. Mensaje en pedidos.dlq.",
         icon: "warning",
         confirmButtonColor: "#f39c12",
       });
@@ -60,24 +66,24 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
     }
   };
 
-  // 2. Simulación de Quiebre de Stock (inventario.queue -> DLQ)
+  // 2. Falla en Inventario (inventario.queue -> inventario.dlq)
   const handleSimularFallaInventario = async () => {
     try {
       Swal.fire({
         title: "Simulando Quiebre de Stock...",
-        text: "Enviando evento con stock no disponible a RabbitMQ",
+        text: "Enviando evento a inventario.queue para activar su DLQ",
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading(),
       });
 
-      await enviarPedidoAMQP(
+      await enviarInventarioAMQP(
         `INV-FAIL-${Date.now()}`,
         `ERROR_STOCK: Inconsistencia física de bodega para usuario ID ${usuarioId}. Stock insuficiente.`
       );
 
       Swal.fire({
         title: "¡Rechazado a DLQ!",
-        text: "El consumidor de inventario aplicó basicNack. Mensaje resguardado en pedidos.dlq.",
+        text: "El consumidor de inventario aplicó basicNack. Mensaje resguardado en inventario.dlq.",
         icon: "warning",
         confirmButtonColor: "#f39c12",
       });
@@ -86,24 +92,24 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
     }
   };
 
-  // 3. Simulación de Caída SMTP / Notificaciones (notificaciones.queue -> DLQ)
+  // 3. Falla en Notificaciones (notificaciones.queue -> notificaciones.dlq)
   const handleSimularFallaNotificacion = async () => {
     try {
       Swal.fire({
-        title: "Simulando Caída de Correo...",
-        text: "Enviando evento de falla en servidor SMTP a RabbitMQ",
+        title: "Simulando Caída SMTP...",
+        text: "Enviando evento a notificaciones.queue para activar su DLQ",
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading(),
       });
 
-      await enviarPedidoAMQP(
+      await enviarNotificacionAMQP(
         `NOTIF-FAIL-${Date.now()}`,
         `ERROR_NOTIFICACION: Timeout al conectar con servidor SMTP externo para usuario ID ${usuarioId}.`
       );
 
       Swal.fire({
         title: "¡Rechazado a DLQ!",
-        text: "El consumidor de notificaciones aplicó basicNack. Evento enviado a pedidos.dlq.",
+        text: "El consumidor de notificaciones aplicó basicNack. Mensaje resguardado en notificaciones.dlq.",
         icon: "warning",
         confirmButtonColor: "#f39c12",
       });
@@ -114,6 +120,8 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
 
   return (
     <>
+      <Navbar />
+
       <div className="container py-5">
         <h2 className="mb-4 text-center">Checkout</h2>
 
@@ -237,10 +245,10 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                       try {
                         const order = await actions.order.capture();
 
-                        // 1. Guardar la boleta en Oracle DB y emitir eventos concurrentes a RabbitMQ
+                        // 1. Guardar la boleta en Oracle DB y emitir eventos concurrentes
                         const boletaBD = await generarBoleta(usuarioId, carrito, false);
 
-                        // 2. Preparar los datos para la pantalla final /boleta
+                        // 2. Preparar los datos para la vista /boleta
                         const items = carrito.map((p) => {
                           const precioFinal = p.descuento
                             ? Math.round(p.precio * (1 - p.descuento / 100))
@@ -336,7 +344,7 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                   <small className="text-muted d-block text-center mb-2 fw-bold">
                     Demostración de Tolerancia a Fallos (DLQ)
                   </small>
-                  
+
                   <button
                     className="btn btn-outline-danger btn-sm w-100 mb-1"
                     onClick={handleSimularFallaDLQ}
@@ -370,6 +378,7 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
           </div>
         )}
       </div>
+
       <Footer />
     </>
   );

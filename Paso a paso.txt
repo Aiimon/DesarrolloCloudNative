@@ -9,10 +9,12 @@ estudiante@Pedido36001.onmicrosoft.com
 Prueba2026..
 
 Conexión a la máquina EC2
-ssh -i "labsuser.pem" ubuntu@98.89.1.201
+ssh -i "labsuser.pem" ubuntu@3.210.29.100
 
 Inicia la aplicación en segundo plano
-nohup java -Xms128m -Xmx320m -XX:MaxMetaspaceSize=160m -jar /home/ubuntu/app.jar   --spring.rabbitmq.username=admin   --spring.rabbitmq.password=admin123 > /home/ubuntu/app.log 2>&1 &
+nohup java -Xms128m -Xmx320m -XX:MaxMetaspaceSize=160m -jar /home/ubuntu/app.jar \
+  --spring.rabbitmq.username=admin \
+  --spring.rabbitmq.password=admin123 > /home/ubuntu/app.log 2>&1 &
 
 Valida si el backend inicio correctamente (mediante logs)
 tail -f /home/ubuntu/app.log
@@ -21,9 +23,18 @@ Prueba local dentro de la EC2
 curl http://localhost:8082/v2/productos/todos
 
 Detiene proceso previo de Java
-sudo fuser -k 8082/tcp 2>/dev/null
+sudo fuser -k 8082/tcp
 
 
 Paypal
 sb-wxuwa47149727@personal.example.com
 {b^9Mv<*
+
+
+
+
+Verifica si rabbit esta levantado
+docker ps -a
+
+Para levantarlo
+docker start rabbitmq-1 rabbitmq-2

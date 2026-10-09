@@ -404,3 +404,38 @@ export const generarBoleta = async (usuarioId, itemsDirectos = null, simularFall
 
   return boletaGenerada;
 };
+// Simulación directa para inventario.queue -> inventario.dlq
+export const enviarInventarioAMQP = async (idPedido, descripcion) => {
+  try {
+    const resp = await fetch(`${API_PEDIDOS_AMQP}/simular/inventario`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({
+        cliente: idPedido,
+        detalle: descripcion,
+      }),
+    });
+    return resp.ok ? await resp.json() : null;
+  } catch (error) {
+    console.warn("[AMQP] Error al emitir mensaje a inventario:", error);
+    return null;
+  }
+};
+
+// Simulación directa para notificaciones.queue -> notificaciones.dlq
+export const enviarNotificacionAMQP = async (idPedido, descripcion) => {
+  try {
+    const resp = await fetch(`${API_PEDIDOS_AMQP}/simular/notificaciones`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({
+        cliente: idPedido,
+        detalle: descripcion,
+      }),
+    });
+    return resp.ok ? await resp.json() : null;
+  } catch (error) {
+    console.warn("[AMQP] Error al emitir mensaje a notificaciones:", error);
+    return null;
+  }
+};

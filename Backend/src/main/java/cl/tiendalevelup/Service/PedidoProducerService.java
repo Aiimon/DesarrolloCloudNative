@@ -18,7 +18,7 @@ public class PedidoProducerService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // =========================================================================
-    // 1. MÉTODO ORIGINAL (Usado por CarritoController y PedidoController)
+    // 1. PUBLICACIÓN GENERAL / PEDIDOS (pedidos.queue)
     // =========================================================================
     public void enviarPedido(String idPedido, String mensajeDetalle) {
         try {
@@ -37,16 +37,64 @@ public class PedidoProducerService {
 
             System.out.println("[PRODUCER] Mensaje enviado a pedidos.queue -> ID: " + idPedido);
         } catch (Exception e) {
-            System.err.println("[PRODUCER ERROR] Error enviando pedido simple: " + e.getMessage());
+            System.err.println("[PRODUCER ERROR] Error enviando pedido: " + e.getMessage());
         }
     }
 
     // =========================================================================
-    // 2. MÉTODO NUEVO (Emisión concurrente a las 3 colas: Pedidos, Notificaciones, Inventario)
+    // 2. SIMULACIÓN DIRECTA A INVENTARIO (inventario.queue)
+    // =========================================================================
+    public void enviarAInventario(String idRef, String mensajeDetalle) {
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("idRef", idRef);
+            payload.put("mensaje", mensajeDetalle);
+            payload.put("timestamp", System.currentTimeMillis());
+
+            String jsonPayload = objectMapper.writeValueAsString(payload);
+
+            rabbitTemplate.convertAndSend(
+                RabbitMQConfig.PEDIDOS_EXCHANGE,
+                RabbitMQConfig.INVENTARIO_ROUTING_KEY, // "pedido.stock"
+                jsonPayload
+            );
+
+            System.out.println("[PRODUCER] Mensaje emitido directamente a inventario.queue -> ID: " + idRef);
+        } catch (Exception e) {
+            System.err.println("[PRODUCER ERROR] Error enviando a inventario: " + e.getMessage());
+        }
+    }
+
+    // =========================================================================
+    // 3. SIMULACIÓN DIRECTA A NOTIFICACIONES (notificaciones.queue)
+    // =========================================================================
+    public void enviarANotificaciones(String idRef, String mensajeDetalle) {
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("idRef", idRef);
+            payload.put("mensaje", mensajeDetalle);
+            payload.put("timestamp", System.currentTimeMillis());
+
+            String jsonPayload = objectMapper.writeValueAsString(payload);
+
+            rabbitTemplate.convertAndSend(
+                RabbitMQConfig.PEDIDOS_EXCHANGE,
+                RabbitMQConfig.NOTIFICACIONES_ROUTING_KEY, // "pedido.notificacion"
+                jsonPayload
+            );
+
+            System.out.println("[PRODUCER] Mensaje emitido directamente a notificaciones.queue -> ID: " + idRef);
+        } catch (Exception e) {
+            System.err.println("[PRODUCER ERROR] Error enviando a notificaciones: " + e.getMessage());
+        }
+    }
+
+    // =========================================================================
+    // 4. EMISIÓN CONCURRENTE DE COMPRA (Pedidos, Notificaciones, Inventario)
     // =========================================================================
     public void publicarEventosDeCompra(Long boletaId, Object itemsCarrito, Double total, String email) {
         try {
-            // 1. Cola de Pedidos (Facturación)
+            // 1. Facturación / Pedidos
             Map<String, Object> msgPedido = new HashMap<>();
             msgPedido.put("boletaId", boletaId);
             msgPedido.put("total", total);
@@ -58,7 +106,7 @@ public class PedidoProducerService {
                 objectMapper.writeValueAsString(msgPedido)
             );
 
-            // 2. Cola de Notificaciones (Email/Comprobante)
+            // 2. Email / Notificaciones
             Map<String, Object> msgNotif = new HashMap<>();
             msgNotif.put("boletaId", boletaId);
             msgNotif.put("destinatario", (email != null && !email.isBlank()) ? email : "cliente@tiendalevelup.cl");
@@ -70,7 +118,7 @@ public class PedidoProducerService {
                 objectMapper.writeValueAsString(msgNotif)
             );
 
-            // 3. Cola de Inventario (Descuento de stock en Oracle ADB)
+            // 3. Stock / Inventario
             Map<String, Object> msgStock = new HashMap<>();
             msgStock.put("boletaId", boletaId);
             msgStock.put("items", itemsCarrito);
@@ -81,10 +129,9 @@ public class PedidoProducerService {
                 objectMapper.writeValueAsString(msgStock)
             );
 
-            System.out.println("[PRODUCER] Eventos de compra distribuidos a las 3 colas para Boleta N° " + boletaId);
-
+            System.out.println("[PRODUCER] Eventos distribuidos a las 3 colas para Boleta N° " + boletaId);
         } catch (Exception e) {
-            System.err.println("[PRODUCER ERROR] Falla al publicar eventos de compra: " + e.getMessage());
+            System.err.println("[PRODUCER ERROR] Falla al publicar eventos: " + e.getMessage());
         }
     }
 }
