@@ -9,6 +9,7 @@ import {
   enviarPedidoAMQP,
   enviarInventarioAMQP,
   enviarNotificacionAMQP,
+  emitirBoletaKafka, // <-- Importamos la función de Kafka
 } from "../utils/apihelper";
 
 function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
@@ -27,7 +28,6 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
     return acc + p.cantidad * precioFinal;
   }, 0);
 
-  // Obtiene el ID del usuario autenticado (ID 21 como valor de respaldo)
   const usuarioActivo =
     JSON.parse(localStorage.getItem("usuario")) ||
     JSON.parse(localStorage.getItem("usuarioActual")) ||
@@ -40,7 +40,6 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
 
   // ================= PANEL DE PRUEBAS DE RESILIENCIA (DLQ / NACK) =================
 
-  // 1. Falla en Pagos (pedidos.queue -> pedidos.dlq)
   const handleSimularFallaDLQ = async () => {
     try {
       Swal.fire({
@@ -66,7 +65,6 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
     }
   };
 
-  // 2. Falla en Inventario (inventario.queue -> inventario.dlq)
   const handleSimularFallaInventario = async () => {
     try {
       Swal.fire({
@@ -92,7 +90,6 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
     }
   };
 
-  // 3. Falla en Notificaciones (notificaciones.queue -> notificaciones.dlq)
   const handleSimularFallaNotificacion = async () => {
     try {
       Swal.fire({
@@ -112,6 +109,28 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
         text: "El consumidor de notificaciones aplicó basicNack. Mensaje resguardado en notificaciones.dlq.",
         icon: "warning",
         confirmButtonColor: "#f39c12",
+      });
+    } catch (error) {
+      Swal.fire("Error", error.message, "error");
+    }
+  };
+
+  // Botón directo para probar Kafka Stream (Boleta de alto valor > $100.000)
+  const handleSimularKafkaStream = async () => {
+    try {
+      const boletaPrueba = {
+        id: Math.floor(Math.random() * 10000) + 100,
+        total: 150000.0,
+        usuario: { email: usuarioActivo.email || "test@duocuc.cl" },
+      };
+
+      await emitirBoletaKafka(boletaPrueba);
+
+      Swal.fire({
+        title: "¡Evento enviado a Kafka!",
+        text: `Boleta ID ${boletaPrueba.id} ($150.000) enviada a boletas-creadas. Generará alerta en Kafka Streams.`,
+        icon: "info",
+        confirmButtonColor: "#3085d6",
       });
     } catch (error) {
       Swal.fire("Error", error.message, "error");
@@ -245,10 +264,17 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                       try {
                         const order = await actions.order.capture();
 
-                        // 1. Guardar la boleta en Oracle DB y emitir eventos concurrentes
+                        // 1. Guardar la boleta en Oracle DB
                         const boletaBD = await generarBoleta(usuarioId, carrito, false);
 
-                        // 2. Preparar los datos para la vista /boleta
+                        // 2. DISPARAR EVENTO A KAFKA (Streaming en tiempo real)
+                        await emitirBoletaKafka({
+                          id: boletaBD.id,
+                          total: totalPrecio,
+                          usuario: { email: usuarioActivo.email || "cliente@tiendalevelup.cl" }
+                        });
+
+                        // 3. Preparar los datos para la vista /boleta
                         const items = carrito.map((p) => {
                           const precioFinal = p.descuento
                             ? Math.round(p.precio * (1 - p.descuento / 100))
@@ -288,7 +314,7 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
 
                         Swal.fire({
                           title: "¡Compra exitosa!",
-                          text: `Boleta N° ${boletaBD.id} registrada en Oracle y procesada concurrentemente por RabbitMQ.`,
+                          text: `Boleta N° ${boletaBD.id} registrada en Oracle y transmitida a Kafka + RabbitMQ.`,
                           icon: "success",
                           confirmButtonText: "Ver boleta",
                           confirmButtonColor: "#3085d6",
@@ -339,10 +365,10 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                   />
                 </PayPalScriptProvider>
 
-                {/* PANEL DE PRUEBAS DE RESILIENCIA (EVIDENCIA EVALUACIÓN EP2) */}
+                {/* PANEL DE PRUEBAS DE RESILIENCIA (RABBITMQ DLQ + KAFKA STREAMS) */}
                 <div className="border border-secondary rounded p-2 mt-3 bg-dark">
                   <small className="text-muted d-block text-center mb-2 fw-bold">
-                    Demostración de Tolerancia a Fallos (DLQ)
+                    Demostración de Eventos y Resiliencia
                   </small>
 
                   <button
@@ -360,10 +386,17 @@ function Checkout({ carrito, onActualizarCantidad, onCompraExitosa }) {
                   </button>
 
                   <button
-                    className="btn btn-outline-info btn-sm w-100 mb-2"
+                    className="btn btn-outline-info btn-sm w-100 mb-1"
                     onClick={handleSimularFallaNotificacion}
                   >
                     ✉️ 3. Caída SMTP (notificaciones.queue)
+                  </button>
+
+                  <button
+                    className="btn btn-outline-primary btn-sm w-100 mb-2"
+                    onClick={handleSimularKafkaStream}
+                  >
+                    🚀 4. Simular Evento Kafka {"Total > $100.000"}
                   </button>
                 </div>
 

@@ -438,4 +438,23 @@ export const enviarNotificacionAMQP = async (idPedido, descripcion) => {
     console.warn("[AMQP] Error al emitir mensaje a notificaciones:", error);
     return null;
   }
+  
+};
+
+// Emitir boleta a Apache Kafka (boletas-creadas)
+export const emitirBoletaKafka = async (boletaPayload) => {
+  try {
+    const resp = await fetch("http://3.210.29.100:8082/api/kafka-test/boleta", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(boletaPayload),
+    });
+    if (resp.ok) {
+      console.log("[Kafka] Evento de boleta transmitido exitosamente");
+    }
+  } catch (error) {
+    console.warn("[Kafka] Error al emitir evento a Kafka:", error);
+  }
 };
