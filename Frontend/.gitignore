@@ -9,8 +9,12 @@ lerna-debug.log*
 
 node_modules
 dist
+dist.zip
 dist-ssr
 *.local
+
+nueva_clave
+nueva_clave.pub
 
 # Editor directories and files
 .vscode/*
