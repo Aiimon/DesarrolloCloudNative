@@ -12,9 +12,7 @@ Conexión a la máquina EC2
 ssh -i "labsuser.pem" ubuntu@3.210.29.100
 
 Inicia la aplicación en segundo plano
-nohup java -Xms128m -Xmx320m -XX:MaxMetaspaceSize=160m -jar /home/ubuntu/app.jar \
-  --spring.rabbitmq.username=admin \
-  --spring.rabbitmq.password=admin123 > /home/ubuntu/app.log 2>&1 &
+nohup java -Xms64m -Xmx128m -jar /home/ubuntu/TiendaLevelUp-0.0.1-SNAPSHOT.jar > app.log 2>&1 & echo $! > app.pid
 
 Valida si el backend inicio correctamente (mediante logs)
 tail -f /home/ubuntu/app.log
@@ -38,3 +36,21 @@ docker ps -a
 
 Para levantarlo
 docker start rabbitmq-1 rabbitmq-2
+
+
+
+
+
+
+
+
+
+scp -i keyfrontend.pem dist.zip ubuntu@3.212.146.54:/home/ubuntu/
+
+
+
+
+
+
+
+
