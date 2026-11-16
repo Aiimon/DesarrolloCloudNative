@@ -13,7 +13,7 @@ import org.springframework.kafka.annotation.EnableKafkaStreams;
 import org.springframework.kafka.support.serializer.JsonSerde;
 
 @Configuration
-@EnableKafkaStreams  // <-- Habilita la creación automática del bean StreamsBuilder
+@EnableKafkaStreams
 public class PipelineTopology {
 
     @Bean
