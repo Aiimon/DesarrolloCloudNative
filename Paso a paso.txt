@@ -1,45 +1,57 @@
-Cambiar ip frontend (apihelper)
-Cambiar ip apigwateway - integraciones
-
-Prueba
-https://h1m5l703rk.execute-api.us-east-1.amazonaws.com/Desarrollo/v2/productos/todos
-
 Credenciales User tenant
 estudiante@Pedido36001.onmicrosoft.com
 Prueba2026..
-
-Conexión a la máquina EC2
-ssh -i "labsuser.pem" ubuntu@3.210.29.100
-
-Inicia la aplicación en segundo plano
-nohup java -Xms64m -Xmx128m -jar /home/ubuntu/TiendaLevelUp-0.0.1-SNAPSHOT.jar > app.log 2>&1 & echo $! > app.pid
-
-Valida si el backend inicio correctamente (mediante logs)
-tail -f /home/ubuntu/app.log
-
-Prueba local dentro de la EC2
-curl http://localhost:8082/v2/productos/todos
-
-Detiene proceso previo de Java
-sudo fuser -k 8082/tcp
-
 
 Paypal
 sb-wxuwa47149727@personal.example.com
 {b^9Mv<*
 
+Conexión a la máquina EC2
+ssh -i "labsuser.pem" ubuntu@3.210.29.100
+
+Valida si el backend inicio correctamente (mediante logs)
+tail -f /home/ubuntu/app.log
+
+Apaga todo
+cd /home/ubuntu
+kill -9 $(cat /home/ubuntu/app.pid) 2>/dev/null || pkill -9 -f 'TiendaLevelUp-0.0.1-SNAPSHOT.jar' || true
+> /home/ubuntu/app.log
+sudo docker compose down
+
+Levantar la infraestructura base (RabbitMQ + Zookeeper)
+sudo docker compose up -d rabbitmq-1 rabbitmq-2 zookeeper
+
+Levantar los 3 brokers de Kafka de forma escalonada y Kafka UI
+sudo docker compose up -d kafka-1
+sudo docker compose up -d kafka-2
+sudo docker compose up -d kafka-3
+sudo docker compose up -d kafka-ui
+sudo docker ps
+
+Crear los tópicos en el clúster (quedarán guardados en los volúmenes persistentes)
+Bash
+sudo docker exec kafka-1 kafka-topics --create --topic eventos-carrito --bootstrap-server kafka-1:29092 --partitions 3 --replication-factor 3 --if-not-exists
+sudo docker exec kafka-1 kafka-topics --create --topic stock-alertas-critico --bootstrap-server kafka-1:29092 --partitions 3 --replication-factor 3 --if-not-exists
+sudo docker exec kafka-1 kafka-topics --create --topic boletas-creadas --bootstrap-server kafka-1:29092 --partitions 3 --replication-factor 3 --if-not-exists
+sudo docker exec kafka-1 kafka-topics --create --topic boletas-alertas --bootstrap-server kafka-1:29092 --partitions 3 --replication-factor 3 --if-not-exists
+sudo docker exec kafka-1 kafka-topics --create --topic eventos-carrito-dlt --bootstrap-server kafka-1:29092 --partitions 3 --replication-factor 3 --config min.insync.replicas=1 --if-not-exists
+
+Comprobamos que esten todos
+sudo docker exec kafka-1 kafka-topics --describe --bootstrap-server kafka-1:29092
+
+levantamos el backend
+nohup java -Xms128m -Xmx224m -XX:+UseSerialGC -jar /home/ubuntu/TiendaLevelUp-0.0.1-SNAPSHOT.jar \
+  --spring.kafka.consumer.key-deserializer=org.springframework.kafka.support.serializer.ErrorHandlingDeserializer \
+  --spring.kafka.consumer.value-deserializer=org.springframework.kafka.support.serializer.ErrorHandlingDeserializer \
+  --spring.kafka.consumer.properties.spring.deserializer.key.delegate.class=org.apache.kafka.common.serialization.StringDeserializer \
+  --spring.kafka.consumer.properties.spring.deserializer.value.delegate.class=org.springframework.kafka.support.serializer.JsonDeserializer \
+  --spring.kafka.consumer.properties.spring.json.value.default.type=cl.tiendalevelup.dto.EventoCarritoDTO \
+  --spring.kafka.consumer.properties.spring.json.use.type.info.headers=false \
+  --spring.kafka.consumer.properties.spring.json.trusted.packages="*" \
+  > /home/ubuntu/app.log 2>&1 & echo $! > /home/ubuntu/app.pid
 
 
-
-Verifica si rabbit esta levantado
-docker ps -a
-
-Para levantarlo
-docker start rabbitmq-1 rabbitmq-2
-
-
-
-
+https://mermaid.ink/img/pako:eNqVV19v29YV_yoHDDzbKCWLpP6ZSQ1QEu0pkSxFUpJ1VRFckZc2a4qXuyRbx46Boi8D9tKiC7Zhe0hbtA976FP3MGyP_ib5AutH2Ln8J4mRkVQIHJL38Hfu-Z3fOefyWrKYTSVd2tm5dn030uF6NzqnS7qrw-6ChHRXhvTBU8JdsvBoiCvXsOswPzomS9d7ISyn9IxReNKXYcIWLGIyhMQPKyHlriMQhPXUvUpQlWZwuXtzc7OzM-dz3_HY59Y54RHMOuIe8LezA5VKBY77AwMUHbqDvnk6M-EjmJonTyb9ntET67l1GC_OOAnOYcaCj-eSUoUuCQjYFMachtSPiOXe_uzDC8Bdxty1iT2XPsnfFj_b5dSKXObDYLL-_NhEvF9ef_NfeLA4OuYYA_VteEYXsDdz8ZIM6GfUexLsPzhYHD1Y8IOjLoluv_PYGRLQJZy7EUO33XNqXbA4Knnt98YJ_KuvBXy_R8gUDsC4ijkFo1dADtiZ68PIiKNzFcHMpRsm4Tx8NisBHpvwoFI5ejmX0ncOkJELmlm-FP5ya9y7uNzGt6pDx-g-Mk97MB1P-qcn0BmNZlv5Hro2BqBWoUOsC8HM0LU4w5x_5louC2EacNc_gw5jEbz54hUYz6ZgdlXY06qqUquqh1WlVtPbtba6_54JmZrdhLJ_fPe_f3-VJMX1Is5EhAVfT4mHKYYOJZzylIES-ngy6iUwf_5BYIw5s2MrYiiWAqQ3G4XwcDo6BQKPiHNBkPkJWSzcaPi4hNYdnU5TtB8FWh26zA_jJfo-4SwOQvgAphGnZLlCR48WDbF4UJwMAsKJRz2hFPyfRyQseTB6wzTqb7OoSzwb9tL1C_ATGkaJQGa3PweuheuoQOaR8KDj-jYmpAyPpGJ6jxJatj1H9--hG03U6e3fpzNzYk6hN0IJTZCb4Xg0Nbeqp8OiiC0xMK0Kfd_hBPfNMQ8xJ4JCLDVsHlcEU4kSLqTTYyg1jgbLABl4l27W1wrHST7TjP0Jut7tf8IIEY2AWOc0S_ZemjGh3hdg-MS7_SlyLVJ2t-ly1b_y36PnnckIeUj18fp7kTsNOhw1yYUufs_wigaUF8m7EO4rCuzph7VDdR9eQvpETZ9oqyda-qS-n7z3y-u__CjEMWTYw1HJTBe-0mCe9NEUq6yWtKktITx6PhuN-93px3tim3_9MlNZfaWgPQ3G2KKF3HwaYmPRYHL7z8BDTsJV83vzxfeADRE1HVasrPv9xl-Ewf33-Qvi9QXzKBZAxUL6bRIWsGGEea9k5YGrLu4lB994saig_U_uzEYi2jzodauSvDdUk1Z_ksiv_7iSTd4UcCJwnHjEEhQR79cqZfL8dNQzM518K9gvPPzWgD0VTpnN1qjmidvlHxKpNJotFXOiK-Jif3NdTde1fF3btrPJ897gscj-m7_lLSbpGDKYlzib_TMqmgjaFP5Nn8dR3sBw0jrE85JOg5NnK_lZgJDOJ5NzxnFLE4rwV0xMp2QPW5LxjrZTF-MKO0wP_xmz0XS91YwmRirpV_8SIY04sTwcrXHEfLZkcQg9EhFxxoG9rsdiO6E3mVRjrE8X2fctl-AmPZJmNT1AYHtYzgZiVj_DqGm0n8db2h8OBvN3ffwzhafmZNbvGgO8HPSH476xsU-c2x9-KGjBzjkDY9zH1pCNr2x0YyvOjUWXzszH8UJUIJhpzQnDsqrz--yNbDRhnjrEI75FiXhJTLAN-OwUMaQo6E8pv_2JgDF8PE7TlOQxN8fZAJVqYp1MISSNk3QjWbG907KEKDaTx5dlATMQxl5E7DRGTOsWMpLQ0AjTchITbpM101JikOX-YFMqFqo97FEHIhZ02CU4rufp96jjNB1Hxp1in9bvqY2mRhfZbeVz147OdTW4lC3mMa7fU6hG2uT-W5BL115BOjXHduoFpNIkWp3cDVlvaKr9NiQesdcg2w5xrAJS0-pKo3EnZM1RWuqWXSZTZS106qhrodedepPeDaopKm0rb4OmbWhtq47TonaBSkmjXbPuRG1Zqq2ob6PaC-yGNIcUG1ULSNtSm2rzbkhHsZUthOK4sld7dNYiP6wTbdHeBFSqja2EbsCKz5FMTpv-xLk5E0VpIT0SZdktraWzPM9SaTGdQiu6S8tYBhlppYVjU8avAhnbiyxKSRbFJ2OlykX5ynkHkbM6lZNGnRB2X5KlM_yeknRs_yGVJTz0Lom4l66Fl7mUfDjOJR0vObXjy4pN-EUlIW4uzf0bBAiIj8egZYGBZ-az8-IuDmwS0Z5LcAijDR4QhQnOA8q7LPYjSVe0RgIi6dfSpaS3DquoqaamNrR2S9MOFVl6IekVRcOctTS1rbRQHs1G-0aWrhK3SlVpaM2mghbtRrutNlqyRG1xiBqmH8bJ9_HN_wFfkNC8?type=png
 
 
 
